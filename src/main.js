@@ -16,26 +16,29 @@ import { Anchors } from './anchors.js';
 import { Eater } from './eat.js';
 import { Physics } from './physics.js';
 import { splat } from './sfx.js';
+import { applyIcons, icon } from './icons.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 
-const COLORS = ['#4fd1c5', '#f472b6', '#facc15', '#a78bfa', '#60a5fa', '#fb923c', '#4ade80', '#ffffff'];
+// Paint colors: warm and clear, readable over a camera image.
+const COLORS = ['#ff5a36', '#ffbe0b', '#2ec27e', '#2f80ed', '#8b5cf6', '#ff70a6', '#17171a', '#f7f5f0'];
 const HOLD_TIME = 0.8; // seconds to hold a fist / peace sign
 const TOOL_NAMES = { create: 'Create', paint: 'Paint', erase: 'Erase' };
 const SHAPE_NAMES = { board: 'Area', slime: 'Slime', bar: 'Bar', box: 'Box', sphere: 'Sphere', cylinder: 'Cylinder', cone: 'Cone', torus: 'Ring' };
-const SHAPE_ICONS = { board: '⬜', slime: '🟢', bar: '▭', box: '◻︎', sphere: '◯', cylinder: '⌭', cone: '△', torus: '◎' };
+
 // Settings that are remembered between visits.
-const PERSIST = ['tool', 'shape', 'color', 'size', 'showSkeleton', 'face', 'pose', 'fov', 'glow',
-  'eat', 'wristRotate', 'physics', 'stick'];
-const SETTINGS_VERSION = 2;
+const PERSIST = ['tool', 'shape', 'color', 'size', 'showSkeleton', 'face', 'pose', 'fov',
+  'eat', 'wristRotate', 'physics', 'stick', 'saver'];
+const MOBILE = matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const SETTINGS_VERSION = 3;
 
 // ------------------------------------------------------------------ settings
 
 const settings = {
   tool: 'create', shape: 'board', color: COLORS[0], size: 8,
-  showSkeleton: true, face: false, pose: false, glow: true, fov: 62,
-  eat: true, wristRotate: true, physics: false, stick: false,
+  showSkeleton: false, face: false, pose: false, fov: 62,
+  eat: true, wristRotate: true, physics: false, stick: false, saver: MOBILE,
   mirror: true, motion: false, freeView: false, pointerHand: false,
 };
 try {
@@ -43,6 +46,7 @@ try {
   for (const k of PERSIST) if (k in saved) settings[k] = saved[k];
   if (!TOOLS.includes(settings.tool)) settings.tool = 'create'; // older versions had more tools
   if ((saved.v ?? 1) < 2) settings.shape = 'board'; // two-hand pinch now makes a drawing area by default
+  if ((saved.v ?? 1) < 3) { settings.color = COLORS[0]; settings.showSkeleton = false; } // new look
 } catch { /* ignore */ }
 
 function saveSettings() {
@@ -57,12 +61,12 @@ function saveSettings() {
 
 const video = $('#video');
 const stage = $('#stage');
-const world = new World($('#three'), video);
+const world = new World($('#three'), video, { antialias: !settings.saver });
 const fx = new Effects(world.scene);
 const store = new Store(world.content);
 store.load();
 const anchors = new Anchors({ world });
-const tools = new Tools({ world, fx, store, settings, anchors, onStick: (label) => toast(`📌 Stuck to ${label}`) });
+const tools = new Tools({ world, fx, store, settings, anchors, onStick: (label) => toast(`Stuck to ${label}`) });
 const physics = new Physics({
   world,
   onSettled: () => store.commit(),
@@ -121,7 +125,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // Face tracking feeds the face mesh, eating, and sticking things to your face.
-const needsFace = () => settings.face || settings.eat || settings.stick;
+const needsFace = () => settings.face || settings.stick || (settings.eat && store.count > 0);
 
 async function startTracker() {
   if (trackerStarted) return;
@@ -175,7 +179,9 @@ function layout() {
   h = Math.round(h);
   stage.style.width = `${w}px`;
   stage.style.height = `${h}px`;
-  const pr = Math.min(devicePixelRatio, 2, Math.sqrt(4e6 / (w * h))) * quality.scale;
+  // Battery saver keeps the 3D view near the screen's base resolution: phones
+  // have 2-3x pixel density, and rendering all of it heats them up.
+  const pr = Math.min(devicePixelRatio, settings.saver ? 1.25 : 2, Math.sqrt(4e6 / (w * h))) * quality.scale;
   world.resize(w, h, pr);
   overlay.resize(w, h, pr);
   layoutKey = `${W}x${H}@${vw}x${vh}`;
@@ -202,7 +208,7 @@ async function useLocalCamera() {
   $('#pair').classList.add('hidden');
   stopStream(stream);
   try {
-    stream = await openCamera(facing);
+    stream = await openCamera(facing, settings.saver);
     video.srcObject = stream;
     await videoReady(video);
     await video.play().catch(() => {});
@@ -303,7 +309,6 @@ async function setSetting(key, value) {
     else input.value = value;
   }
   if (key === 'mirror') world.setMirror(value);
-  if (key === 'glow') world.glow = value;
   if (key === 'freeView') {
     world.setFree(value);
     stage.classList.toggle('free', value);
@@ -321,6 +326,11 @@ async function setSetting(key, value) {
     if (value) physics.wakeAll();
   }
   if (key === 'stick') $('#stick-btn').classList.toggle('active', value);
+  if (key === 'saver') {
+    world.setSaver(value);
+    layout();
+    if (source === 'local' && stream) useLocalCamera(); // reopen at the new camera size
+  }
   if (key === 'motion' && value) {
     if (source === 'remote') {
       remote.needsRecenter = true;
@@ -361,7 +371,6 @@ function setShape(shape) {
 function setColor(color) {
   settings.color = color;
   for (const b of $$('.swatch')) b.classList.toggle('active', b.dataset.color === color);
-  document.documentElement.style.setProperty('--accent', color === '#ffffff' ? '#4fd1c5' : color);
   saveSettings();
 }
 
@@ -372,7 +381,6 @@ function buildToolbar() {
     b.className = 'swatch';
     b.dataset.color = c;
     b.style.background = c;
-    b.style.boxShadow = `0 0 12px ${c}`;
     b.title = c;
     b.onclick = () => setColor(c);
     colors.append(b);
@@ -429,7 +437,7 @@ function buildToolbar() {
   setShape(settings.shape);
   setColor(settings.color);
   world.setMirror(settings.mirror);
-  world.glow = settings.glow;
+  world.setSaver(settings.saver);
 }
 
 function undo() {
@@ -530,18 +538,18 @@ const airUI = new AirUI({
   stage,
   menu: $('#palm-menu'),
   items: [
-    { id: 'create', icon: '✋', label: 'Create', run: () => setTool('create'), active: () => settings.tool === 'create' },
-    { id: 'paint', icon: '🎨', label: 'Paint', run: () => setTool('paint'), active: () => settings.tool === 'paint' },
-    { id: 'erase', icon: '🧽', label: 'Erase', run: () => setTool('erase'), active: () => settings.tool === 'erase' },
-    { id: 'shape', icon: () => SHAPE_ICONS[settings.shape], label: () => SHAPE_NAMES[settings.shape], run: nextShape, keep: true },
+    { id: 'create', icon: icon('create', 22), label: 'Create', run: () => setTool('create'), active: () => settings.tool === 'create' },
+    { id: 'paint', icon: icon('paint', 22), label: 'Paint', run: () => setTool('paint'), active: () => settings.tool === 'paint' },
+    { id: 'erase', icon: icon('erase', 22), label: 'Erase', run: () => setTool('erase'), active: () => settings.tool === 'erase' },
+    { id: 'shape', icon: () => icon(settings.shape, 22), label: () => SHAPE_NAMES[settings.shape], run: nextShape, keep: true },
     { id: 'color', icon: () => `<i class="dot" style="background:${settings.color}"></i>`, label: 'Color', run: nextColor, keep: true },
-    { id: 'physics', icon: '🍎', label: 'Gravity', run: () => setSetting('physics', !settings.physics), active: () => settings.physics, keep: true },
-    { id: 'stick', icon: '📌', label: 'Stick', run: () => setSetting('stick', !settings.stick), active: () => settings.stick, keep: true },
-    { id: 'undo', icon: '↶', label: 'Undo', run: undo, keep: true },
-    { id: 'redo', icon: '↷', label: 'Redo', run: redo, keep: true },
-    { id: 'view', icon: '🧊', label: '3D view', run: () => setSetting('freeView', !settings.freeView), active: () => settings.freeView },
-    { id: 'settings', icon: '⚙️', label: 'Settings', run: () => $('#menu').classList.remove('hidden') },
-    { id: 'close', icon: '✕', label: 'Close', run: () => {} },
+    { id: 'physics', icon: icon('gravity', 22), label: 'Gravity', run: () => setSetting('physics', !settings.physics), active: () => settings.physics, keep: true },
+    { id: 'stick', icon: icon('stick', 22), label: 'Stick', run: () => setSetting('stick', !settings.stick), active: () => settings.stick, keep: true },
+    { id: 'undo', icon: icon('undo', 22), label: 'Undo', run: undo, keep: true },
+    { id: 'redo', icon: icon('redo', 22), label: 'Redo', run: redo, keep: true },
+    { id: 'view', icon: icon('view', 22), label: '3D view', run: () => setSetting('freeView', !settings.freeView), active: () => settings.freeView },
+    { id: 'settings', icon: icon('menu', 22), label: 'Settings', run: () => $('#menu').classList.remove('hidden') },
+    { id: 'close', icon: icon('close', 22), label: 'Close', run: () => {} },
   ],
 });
 
@@ -569,8 +577,23 @@ let fpsTime = 0;
 let hudTime = 0;
 let lastTrackT = 0;
 
+// Frame pacing: battery saver caps at 30 fps, and when nobody is interacting
+// (no hands, nothing moving, no mouse) the app idles at a low frame rate.
+let lastActive = 0;
+addEventListener('pointermove', () => { lastActive = performance.now(); }, { passive: true });
+addEventListener('pointerdown', () => { lastActive = performance.now(); }, { passive: true });
+function frameInterval(now) {
+  const idle = now - lastActive > 3000 && !physics.awake;
+  if (settings.saver) return idle ? 100 : 33;
+  return idle ? 50 : 0;
+}
+
+const appScreen = $('#app');
 function loop(now) {
   requestAnimationFrame(loop);
+  // Nothing to draw on the start screen or while this phone is just a camera.
+  if (appScreen.classList.contains('hidden')) { last = now; return; }
+  if (now - last < frameInterval(now) - 4) return;
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   const t = now / 1000;
@@ -601,6 +624,7 @@ function loop(now) {
     handInput.updateVirtual(virtualHands(view), view, world.camera, t);
     updated = true;
   }
+  if (handInput.active.length || tools.busy().size) lastActive = now;
   if (updated) {
     const trackDt = lastTrackT ? Math.min(t - lastTrackT, 0.2) : 0;
     lastTrackT = t;
@@ -617,6 +641,7 @@ function loop(now) {
   for (const o of world.content.children) if (o.userData.data?.anchor) held.add(o);
   physics.track(dt, held, settings.physics);
   if (settings.physics) physics.update(dt, held, view);
+  world.setFloor(settings.physics && physics.floorY != null ? physics.floorY : null);
 
   fx.update(dt, t, handInput.hands, settings.color, tools.radius, world.camera);
   overlay.draw({
@@ -651,7 +676,7 @@ function updateHud() {
       : `${TOOL_NAMES[settings.tool]} · click or drag over objects`;
   } else if (!hands.length) status = 'Show your hands to the camera';
   else if (settings.tool === 'create') {
-    status = `☝️ point to draw · 🤏 pinch to grab (twist to turn) · 🤏🤏 pull apart for ${settings.shape === 'board' ? 'an area' : `a ${SHAPE_NAMES[settings.shape].toLowerCase()}`} · ✋ hold palm for menu`;
+    status = `Point to draw · Pinch to grab · Pull apart with both hands for ${settings.shape === 'board' ? 'a canvas' : `a ${SHAPE_NAMES[settings.shape].toLowerCase()}`} · Palm up for menu`;
   }
   else status = `${TOOL_NAMES[settings.tool]} · pinch or point at objects`;
   if (tools.hint && (trackerReady || settings.pointerHand)) status = tools.hint[0].toUpperCase() + tools.hint.slice(1);
@@ -696,7 +721,7 @@ async function openSender(code = '', autoConnect = false) {
 async function restartSenderCamera() {
   stopStream(senderStream);
   try {
-    senderStream = await openCamera(senderFacing);
+    senderStream = await openCamera(senderFacing, settings.saver);
   } catch (err) {
     $('#sender-status').textContent = `Camera unavailable: ${err.message}`;
     return;
@@ -787,6 +812,7 @@ for (const b of $$('[data-start]')) {
   };
 }
 
+applyIcons();
 buildToolbar();
 requestAnimationFrame(loop);
 

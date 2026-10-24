@@ -1,24 +1,40 @@
 import { HAND_CONNECTIONS, FACE_CONTOURS, POSE_CONNECTIONS } from './tracker.js';
 
-// Draws the tracking results on a 2D canvas over the 3D view in a neon style.
+// Draws tracking feedback on a 2D canvas over the 3D view: white marks with a
+// soft dark edge, so they read on any camera background.
 
-const HAND_COLORS = ['#4fd1c5', '#f472b6'];
-const HOLD_ICONS = { fist: '↶ undo', peace: '✌ next shape', open: '☰ menu' };
-const ANCHOR_ICONS = { face: '🙂', hand: '✋', body: '🧍' };
+const HOLD_LABELS = { fist: 'Undo', peace: 'Next shape', open: 'Menu' };
+const INK = '#17171a';
+const SHADE = 'rgba(0, 0, 0, 0.28)';
 
-// Neon line glow without canvas shadows (which are slow): a wide, faint
-// stroke under a thin, bright one.
-function glowStroke(g, color, width, alpha = 1) {
+// A white line with a faint dark edge (cheaper than canvas shadows).
+function inkLine(g, width, alpha = 1) {
   g.lineCap = 'round';
   g.lineJoin = 'round';
-  g.strokeStyle = color;
-  g.globalAlpha = alpha * 0.25;
-  g.lineWidth = width * 3.5;
+  g.globalAlpha = alpha * 0.6;
+  g.strokeStyle = SHADE;
+  g.lineWidth = width + 2;
   g.stroke();
   g.globalAlpha = alpha;
+  g.strokeStyle = '#fff';
   g.lineWidth = width;
   g.stroke();
   g.globalAlpha = 1;
+}
+
+// A small rounded label: white chip with ink text.
+function chip(g, text, x, y, align = 'left') {
+  g.font = '500 12px Inter, system-ui, sans-serif';
+  const w = g.measureText(text).width + 14;
+  const h = 22;
+  const left = align === 'center' ? x - w / 2 : x;
+  g.fillStyle = 'rgba(255, 255, 255, 0.95)';
+  g.beginPath();
+  g.roundRect(left, y - h / 2, w, h, 11);
+  g.fill();
+  g.fillStyle = INK;
+  g.textBaseline = 'middle';
+  g.fillText(text, left + 7, y + 0.5);
 }
 
 export class Overlay {
@@ -41,63 +57,38 @@ export class Overlay {
     const X = (p) => (mirror ? 1 - p.x : p.x) * w;
     const Y = (p) => p.y * h;
 
-    // Stick mode: what the camera recognizes, as labeled corner brackets.
+    // Stick mode: what the camera recognizes, as corner brackets with a label.
     for (const a of anchors ?? []) {
       const x = a.box.x * w;
       const y = a.box.y * h;
       const bw = a.box.w * w;
       const bh = a.box.h * h;
-      const k = Math.min(18, bw / 3, bh / 3);
-      const c = a.stuck ? '#facc15' : '#ffffff';
-      g.save();
-      g.strokeStyle = c;
-      g.shadowColor = c;
-      g.shadowBlur = 10;
-      g.lineWidth = 2.5;
-      g.globalAlpha = 0.85;
+      const k = Math.min(16, bw / 3, bh / 3);
       g.beginPath();
       for (const [cx, cy, dx, dy] of [[x, y, 1, 1], [x + bw, y, -1, 1], [x, y + bh, 1, -1], [x + bw, y + bh, -1, -1]]) {
         g.moveTo(cx + dx * k, cy);
         g.lineTo(cx, cy);
         g.lineTo(cx, cy + dy * k);
       }
-      g.stroke();
-      const label = `${ANCHOR_ICONS[a.label] ?? '📦'} ${a.label}${a.score ? ` ${Math.round(a.score * 100)}%` : ''}${a.stuck ? ` · 📌${a.stuck}` : ''}`;
-      g.font = '600 12px system-ui, sans-serif';
-      const tw = g.measureText(label).width + 12;
-      g.shadowBlur = 0;
-      g.globalAlpha = 0.75;
-      g.fillStyle = '#07090d';
-      g.fillRect(x, y - 20, tw, 18);
-      g.globalAlpha = 1;
-      g.fillStyle = c;
-      g.fillText(label, x + 6, y - 7);
-      g.restore();
+      inkLine(g, 2, 0.9);
+      const label = `${a.label}${a.stuck ? ` · ${a.stuck} stuck` : ''}`;
+      chip(g, label, x, y - 14);
     }
 
-    // Eating: a ring around your mouth when something tasty is in range.
+    // Eating: a dashed ring around your mouth when something is in reach.
     if (mouth?.target) {
-      const r = Math.max(18, mouth.r * w * 0.8) * (mouth.armed ? 1.25 + Math.sin(t * 20) * 0.08 : 1);
+      const r = Math.max(18, mouth.r * w * 0.8) * (mouth.armed ? 1.2 : 1);
       g.save();
-      g.strokeStyle = mouth.armed ? '#fb923c' : '#f472b6';
-      g.shadowColor = g.strokeStyle;
-      g.shadowBlur = 18;
-      g.lineWidth = 3;
-      g.setLineDash([6, 6]);
-      g.lineDashOffset = -t * 30;
+      g.setLineDash([5, 6]);
+      g.lineDashOffset = -t * 20;
       g.beginPath();
       g.arc(mouth.x * w, mouth.y * h, r, 0, Math.PI * 2);
-      g.stroke();
-      g.setLineDash([]);
-      g.fillStyle = '#fff';
-      g.font = '600 13px system-ui, sans-serif';
-      g.textAlign = 'center';
-      g.fillText(mouth.armed ? 'now close! 😋' : 'open wide 😮', mouth.x * w, mouth.y * h + r + 18);
+      inkLine(g, 2, 0.95);
       g.restore();
+      chip(g, mouth.armed ? 'Now close' : 'Open wide', mouth.x * w, mouth.y * h + r + 18, 'center');
     }
 
     if (pose) {
-      g.save();
       g.beginPath();
       for (const { start, end } of POSE_CONNECTIONS) {
         const a = pose.lm[start];
@@ -106,12 +97,10 @@ export class Overlay {
         g.moveTo(X(a), Y(a));
         g.lineTo(X(b), Y(b));
       }
-      glowStroke(g, '#a78bfa', 3, 0.85);
-      g.restore();
+      inkLine(g, 2, 0.7);
     }
 
     if (face) {
-      g.save();
       g.beginPath();
       for (const { start, end } of FACE_CONTOURS) {
         const a = face.lm[start];
@@ -119,95 +108,76 @@ export class Overlay {
         g.moveTo(X(a), Y(a));
         g.lineTo(X(b), Y(b));
       }
-      glowStroke(g, '#fde047', 1.2, 0.6);
-      g.restore();
+      inkLine(g, 1, 0.55);
     }
 
-    hands.forEach((hand, i) => {
+    hands.forEach((hand) => {
       if (!hand.present) return;
-      const col = HAND_COLORS[i];
       // Hand landmarks are already in screen space (mirroring applied).
       const hx = (p) => p.x * w;
       const hy = (p) => p.y * h;
 
       if (showSkeleton && hand.lm) {
-        g.save();
         g.beginPath();
         for (const { start, end } of HAND_CONNECTIONS) {
           g.moveTo(hx(hand.lm[start]), hy(hand.lm[start]));
           g.lineTo(hx(hand.lm[end]), hy(hand.lm[end]));
         }
-        glowStroke(g, col, 2.5, 0.9);
-        g.fillStyle = '#fff';
-        for (const p of hand.lm) {
-          g.beginPath();
-          g.arc(hx(p), hy(p), 2.6, 0, Math.PI * 2);
-          g.fill();
-        }
-        g.restore();
+        inkLine(g, 1.5, 0.75);
       }
 
-      // Pointing: a bright dot at the fingertip ("pen tip").
+      // Pointing: a pen tip in the current color at the fingertip.
       if (hand.drawing || hand.gesture === 'point') {
         const tx = hand.tipScreen.x * w;
         const ty = hand.tipScreen.y * h;
-        g.save();
-        g.fillStyle = color;
-        g.shadowColor = color;
-        g.shadowBlur = hand.drawing ? 24 : 10;
-        g.globalAlpha = hand.drawing ? 1 : 0.6;
+        const r = hand.drawing ? 6 : 4.5;
+        g.globalAlpha = hand.drawing ? 1 : 0.75;
+        g.fillStyle = SHADE;
         g.beginPath();
-        g.arc(tx, ty, hand.drawing ? 7 : 5, 0, Math.PI * 2);
+        g.arc(tx, ty, r + 3.5, 0, Math.PI * 2);
         g.fill();
-        g.restore();
+        g.fillStyle = '#fff';
+        g.beginPath();
+        g.arc(tx, ty, r + 2, 0, Math.PI * 2);
+        g.fill();
+        g.fillStyle = color;
+        g.beginPath();
+        g.arc(tx, ty, r, 0, Math.PI * 2);
+        g.fill();
+        g.globalAlpha = 1;
         return;
       }
 
-      // Pinch ring: closes in as you pinch, spins while pinched.
+      // Pinch point: an open ring that closes to a dot while pinching.
       const cx = hand.screen.x * w;
       const cy = hand.screen.y * h;
-      const r = hand.pinching ? 12 : 20;
-      g.save();
-      g.strokeStyle = hand.pinching ? color : col;
-      g.shadowColor = hand.pinching ? color : col;
-      g.shadowBlur = hand.pinching ? 22 : 10;
-      g.lineWidth = hand.pinching ? 3.5 : 2;
       g.beginPath();
+      g.arc(cx, cy, hand.pinching ? 7 : 13, 0, Math.PI * 2);
+      inkLine(g, hand.pinching ? 3 : 2, hand.pinching ? 1 : 0.85);
       if (hand.pinching) {
-        for (let k = 0; k < 3; k++) {
-          const a0 = t * 5 + (k * Math.PI * 2) / 3;
-          g.moveTo(cx + Math.cos(a0) * r, cy + Math.sin(a0) * r);
-          g.arc(cx, cy, r, a0, a0 + 1.4);
-        }
-      } else {
-        g.arc(cx, cy, r, 0, Math.PI * 2);
+        g.fillStyle = '#fff';
+        g.beginPath();
+        g.arc(cx, cy, 3, 0, Math.PI * 2);
+        g.fill();
       }
-      g.stroke();
-      g.restore();
 
-      // Hold-to-trigger gestures show a filling ring at the wrist.
+      // Hold-to-trigger gestures fill a ring above the wrist.
       const holdTime = holdTimes?.[hand.gesture];
       if (holdTime && !(hand.gesture === 'open' && menuOpen) && hand.gestureTime > 0.15 && hand.lm) {
         const k = Math.min(1, (hand.gestureTime - 0.15) / (holdTime - 0.15));
         const wx = hx(hand.lm[0]);
-        const wy = hy(hand.lm[0]) - 10;
-        g.save();
-        g.lineWidth = 5;
-        g.strokeStyle = 'rgba(255,255,255,0.15)';
+        const wy = hy(hand.lm[0]) - 12;
+        g.lineCap = 'round';
+        g.lineWidth = 4;
+        g.strokeStyle = 'rgba(0, 0, 0, 0.3)';
         g.beginPath();
-        g.arc(wx, wy, 26, 0, Math.PI * 2);
+        g.arc(wx, wy, 20, 0, Math.PI * 2);
         g.stroke();
-        g.strokeStyle = col;
-        g.shadowColor = col;
-        g.shadowBlur = 16;
+        g.strokeStyle = '#fff';
         g.beginPath();
-        g.arc(wx, wy, 26, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2);
+        g.arc(wx, wy, 20, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2);
         g.stroke();
-        g.fillStyle = '#fff';
-        g.font = '600 13px system-ui, sans-serif';
-        g.textAlign = 'center';
-        g.fillText(HOLD_ICONS[hand.gesture], wx, wy + 46);
-        g.restore();
+        chip(g, HOLD_LABELS[hand.gesture], wx, wy + 40, 'center');
       }
     });
   }

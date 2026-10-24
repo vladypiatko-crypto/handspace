@@ -1,11 +1,11 @@
 import {
-  BoxGeometry, CatmullRomCurve3, Color, ConeGeometry, CylinderGeometry, DoubleSide, Group, IcosahedronGeometry, Matrix4, Mesh, MeshBasicMaterial,
-  Quaternion, ShaderMaterial, SphereGeometry, TorusGeometry, TubeGeometry, Vector3, WireframeGeometry,
-  EdgesGeometry,
+  CatmullRomCurve3, Color, ConeGeometry, CylinderGeometry, Group, Matrix4, Mesh, MeshPhysicalMaterial,
+  MeshStandardMaterial, Quaternion, SphereGeometry, TorusGeometry, TubeGeometry, Vector3,
 } from 'three';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // Every object in the scene is described by a small JSON-able "data" record kept
@@ -16,11 +16,15 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 //
 // Shapes keep their size on an inner node, so strokes drawn onto a shape (its
 // children) aren't stretched by it.
+//
+// Look: lit, solid materials. Strokes are glossy paint, shapes are soft clay
+// with a light clear coat, drawing areas are paper, slime is wobbly jelly.
 
 export const SHAPES = ['board', 'slime', 'bar', 'box', 'sphere', 'cylinder', 'cone', 'torus'];
-export const holoTime = { value: 0 };
+export const holoTime = { value: 0 }; // shared clock for animated materials
 export const lineMaterials = new Set();
 const lineResolution = { x: 1, y: 1 };
+const HIGHLIGHT = new Color('#ff5a36');
 
 export function setLineResolution(w, h) {
   lineResolution.x = w;
@@ -28,119 +32,45 @@ export function setLineResolution(w, h) {
   for (const m of lineMaterials) m.resolution.set(w, h);
 }
 
-// A bright "neon tube" version of a color: a bit whiter in the core, and
-// scaled so its brightest channel is 1 (dark colors still glow).
-function glow(color, whiten = 0) {
-  const c = new Color(color).lerp(new Color('#fff'), whiten);
-  return c.multiplyScalar(1 / Math.max(c.r, c.g, c.b, 0.05));
-}
-
 // ---------------------------------------------------------------- materials
 
-const holoVertex = /* glsl */ `
-  varying vec3 vN;
-  varying vec3 vV;
-  varying vec3 vW;
-  void main() {
-    vec4 wp = modelMatrix * vec4(position, 1.0);
-    vW = wp.xyz;
-    vec4 mv = viewMatrix * wp;
-    vN = normalize(normalMatrix * normal);
-    vV = normalize(-mv.xyz);
-    gl_Position = projectionMatrix * mv;
-  }
-`;
-
-const holoFragment = /* glsl */ `
-  uniform vec3 color;
-  uniform float time;
-  uniform float highlight;
-  uniform float opacity;
-  varying vec3 vN;
-  varying vec3 vV;
-  varying vec3 vW;
-  void main() {
-    float facing = abs(dot(normalize(vN), normalize(vV)));
-    float rim = pow(1.0 - facing, 2.2);
-    float scan = smoothstep(0.75, 1.0, sin(vW.y * 260.0 - time * 3.0));
-    float pulse = 0.5 + 0.5 * sin(time * 2.0);
-    vec3 c = color * (0.12 + rim * 1.2 + scan * 0.15 + highlight * (0.15 + pulse * 0.25));
-    c = min(c, vec3(1.0));
-    float a = opacity * (0.14 + rim * 0.86 + scan * 0.08 + highlight * 0.15);
-    gl_FragColor = vec4(c, clamp(a, 0.0, 1.0));
-  }
-`;
-
-function holoMaterial(color) {
-  return new ShaderMaterial({
-    uniforms: {
-      color: { value: glow(color) },
-      time: holoTime,
-      highlight: { value: 0 },
-      opacity: { value: 0.85 },
-    },
-    vertexShader: holoVertex,
-    fragmentShader: holoFragment,
-    transparent: true,
-    depthWrite: false,
-    side: DoubleSide,
-  });
+function strokeMaterial(color) {
+  return new MeshStandardMaterial({ color, roughness: 0.38, metalness: 0 });
 }
 
-// Slime: glossy, see-through goo whose surface wobbles. `wobble` is driven by
-// the physics (how hard it was just shaken or squashed).
-const slimeVertex = /* glsl */ `
-  uniform float time;
-  uniform float wobble;
-  varying vec3 vN;
-  varying vec3 vV;
-  void main() {
-    vec3 p = position;
-    float w = sin(p.x * 13.0 + time * 9.0) * sin(p.y * 11.0 + time * 7.0) * sin(p.z * 12.0 + time * 8.0);
-    p += normal * (w * (0.015 + wobble * 0.09) + sin(time * 2.0 + p.y * 6.0) * 0.012);
-    vec4 mv = modelViewMatrix * vec4(p, 1.0);
-    vN = normalize(normalMatrix * normal);
-    vV = normalize(-mv.xyz);
-    gl_Position = projectionMatrix * mv;
-  }
-`;
+function clayMaterial(color) {
+  return new MeshPhysicalMaterial({ color, roughness: 0.55, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.45 });
+}
 
-const slimeFragment = /* glsl */ `
-  uniform vec3 color;
-  uniform float highlight;
-  varying vec3 vN;
-  varying vec3 vV;
-  void main() {
-    vec3 n = normalize(vN);
-    float facing = max(dot(n, normalize(vV)), 0.0);
-    float rim = pow(1.0 - facing, 2.0);
-    vec3 l = normalize(vec3(-0.4, 0.8, 0.6));
-    float spec = pow(max(dot(reflect(-l, n), normalize(vV)), 0.0), 40.0);
-    vec3 c = color * (0.35 + 0.45 * facing + rim * 0.8 + highlight * 0.3) + vec3(spec * 0.9);
-    gl_FragColor = vec4(min(c, vec3(1.0)), 0.55 + rim * 0.35 + spec * 0.3);
-  }
-`;
+function paperMaterial() {
+  return new MeshStandardMaterial({ color: '#fbfaf7', roughness: 0.95, metalness: 0, transparent: true, opacity: 0.95 });
+}
 
+// Glossy jelly whose surface wobbles; physics sets userData.wobble (0..1)
+// when it's shaken or lands.
 function slimeMaterial(color) {
-  return new ShaderMaterial({
-    uniforms: { color: { value: glow(color) }, time: holoTime, wobble: { value: 0 }, highlight: { value: 0 } },
-    vertexShader: slimeVertex,
-    fragmentShader: slimeFragment,
-    transparent: true,
+  const m = new MeshPhysicalMaterial({
+    color, roughness: 0.12, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.06,
+    transparent: true, opacity: 0.9,
   });
-}
-
-function edgeMaterial(color, width = 2.5, brightness = 1) {
-  const m = new LineMaterial({ color: glow(color, 0.2).multiplyScalar(brightness), linewidth: width, transparent: true });
-  m.resolution.set(lineResolution.x, lineResolution.y);
-  m.userData.base = m.color.clone();
-  lineMaterials.add(m);
+  const wobble = { value: 0 };
+  m.userData.wobble = wobble;
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.time = holoTime;
+    shader.uniforms.wobble = wobble;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float time;\nuniform float wobble;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        float w = sin(position.x * 13.0 + time * 9.0) * sin(position.y * 11.0 + time * 7.0) * sin(position.z * 12.0 + time * 8.0);
+        transformed += normal * (w * (0.012 + wobble * 0.08) + sin(time * 2.0 + position.y * 6.0) * 0.01);`);
+  };
   return m;
 }
 
-function strokeMaterial(color) {
-  const m = new MeshBasicMaterial({ color: glow(color) });
-  m.userData.base = m.color.clone();
+function lineMaterial(color, width) {
+  const m = new LineMaterial({ color, linewidth: width });
+  m.resolution.set(lineResolution.x, lineResolution.y);
+  lineMaterials.add(m);
   return m;
 }
 
@@ -155,46 +85,29 @@ function once(key, make) {
   return shared[key];
 }
 
-function edgesFrom(geo, threshold = 1) {
-  return new LineSegmentsGeometry().fromEdgesGeometry(new EdgesGeometry(geo, threshold));
-}
-
 const bodies = {
-  board: () => once('box', () => new BoxGeometry(1, 1, 1)),
-  bar: () => once('box', () => new BoxGeometry(1, 1, 1)),
-  box: () => once('box', () => new BoxGeometry(1, 1, 1)),
-  sphere: () => once('sphere', () => new SphereGeometry(0.5, 48, 32)),
-  cylinder: () => once('cylinder', () => new CylinderGeometry(0.5, 0.5, 1, 48)),
-  cone: () => once('cone', () => new ConeGeometry(0.5, 1, 48)),
-  torus: () => once('torus', () => new TorusGeometry(0.4, 0.1, 24, 72)),
-};
-
-const edges = {
-  board: () => once('e-board', () => new LineSegmentsGeometry().setPositions([
-    -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5,
-    0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5,
-  ])),
-  bar: () => once('e-box', () => edgesFrom(new BoxGeometry(1, 1, 1))),
-  box: () => once('e-box', () => edgesFrom(new BoxGeometry(1, 1, 1))),
-  sphere: () => once('e-sphere', () => new LineSegmentsGeometry().fromWireframeGeometry(new WireframeGeometry(new IcosahedronGeometry(0.503, 1)))),
-  cylinder: () => once('e-cyl', () => edgesFrom(new CylinderGeometry(0.5, 0.5, 1, 10))),
-  cone: () => once('e-cone', () => edgesFrom(new ConeGeometry(0.5, 1, 10))),
-  torus: () => once('e-torus', () => new LineSegmentsGeometry().fromWireframeGeometry(new WireframeGeometry(new TorusGeometry(0.4, 0.1, 6, 18)))),
+  board: () => once('board', () => new RoundedBoxGeometry(1, 1, 1, 4, 0.03)),
+  bar: () => once('bar', () => new RoundedBoxGeometry(1, 1, 1, 4, 0.2)),
+  box: () => once('box', () => new RoundedBoxGeometry(1, 1, 1, 4, 0.08)),
+  sphere: () => once('sphere', () => new SphereGeometry(0.5, 64, 40)),
+  cylinder: () => once('cylinder', () => new CylinderGeometry(0.5, 0.5, 1, 64)),
+  cone: () => once('cone', () => new ConeGeometry(0.5, 1, 64)),
+  torus: () => once('torus', () => new TorusGeometry(0.4, 0.1, 32, 96)),
 };
 
 // Diagonal hatching on the front and back faces of a unit box, like a sketch.
 function hatchGeometry({ n, slant }) {
   const pos = [];
   const step = (1 + slant) / (n + 1);
-  for (const z of [0.501, -0.501]) {
+  for (const z of [0.505, -0.505]) {
     for (let i = 1; i <= n; i++) {
       let x0 = -0.5 - slant + i * step; // bottom end
       let x1 = x0 + slant; // top end
-      let y0 = -0.5;
-      let y1 = 0.5;
+      let y0 = -0.42;
+      let y1 = 0.42;
       // Clip the line to the face.
-      if (x0 < -0.5) { y0 += ((-0.5 - x0) / slant); x0 = -0.5; }
-      if (x1 > 0.5) { y1 -= ((x1 - 0.5) / slant); x1 = 0.5; }
+      if (x0 < -0.45) { y0 += ((-0.45 - x0) / slant) * 0.84; x0 = -0.45; }
+      if (x1 > 0.45) { y1 -= ((x1 - 0.45) / slant) * 0.84; x1 = 0.45; }
       if (y1 - y0 < 0.05) continue;
       pos.push(x0, y0, z, x1, y1, z);
     }
@@ -205,13 +118,13 @@ function hatchGeometry({ n, slant }) {
 // live: a cheaper tube without end caps, rebuilt as the stroke grows.
 function strokeGeometry(pts, radius, live = false) {
   const n = pts.length / 3;
-  const cap = (i) => new SphereGeometry(radius, 12, 8).translate(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
+  const cap = (i) => new SphereGeometry(radius, 16, 10).translate(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
   if (n < 2) return cap(0);
   const points = [];
   for (let i = 0; i < n; i++) points.push(new Vector3(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]));
   const curve = new CatmullRomCurve3(points, false, 'centripetal');
-  if (live) return new TubeGeometry(curve, Math.min(n * 2, 300), radius, 6, false);
-  const tube = new TubeGeometry(curve, Math.min(n * 4, 800), radius, 8, false);
+  if (live) return new TubeGeometry(curve, Math.min(n * 2, 300), radius, 8, false);
+  const tube = new TubeGeometry(curve, Math.min(n * 4, 800), radius, 10, false);
   tube.deleteAttribute('uv');
   const a = cap(0); a.deleteAttribute('uv');
   const b = cap(n - 1); b.deleteAttribute('uv');
@@ -220,28 +133,15 @@ function strokeGeometry(pts, radius, live = false) {
 
 // ---------------------------------------------------------------- build / save
 
-function buildStroke(data) {
-  const mesh = new Mesh(strokeGeometry(data.pts, data.radius), strokeMaterial(data.color));
+function lit(mesh) {
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
   mesh.userData.pick = true;
   return mesh;
 }
 
-// Faint grid on a drawing board, like graph paper.
-function boardGrid() {
-  return once('board-grid', () => {
-    const pos = [];
-    for (let i = 1; i < 6; i++) {
-      const k = -0.5 + i / 6;
-      pos.push(k, -0.5, 0.51, k, 0.5, 0.51, -0.5, k, 0.51, 0.5, k, 0.51);
-    }
-    return new LineSegmentsGeometry().setPositions(pos);
-  });
-}
-
-function boardMaterial() {
-  const m = new MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.14, depthWrite: false, side: DoubleSide });
-  m.userData.board = true;
-  return m;
+function buildStroke(data) {
+  return lit(new Mesh(strokeGeometry(data.pts, data.radius), strokeMaterial(data.color)));
 }
 
 function buildShape(data) {
@@ -249,33 +149,26 @@ function buildShape(data) {
   const inner = new Group();
   inner.name = 'inner';
   inner.scale.fromArray(data.dims);
+  g.add(inner);
   if (data.shape === 'board') {
-    // A white, glowing drawing area: point at it to draw on it.
-    const body = new Mesh(bodies.board(), boardMaterial());
-    body.userData.pick = true;
-    body.userData.noGlow = true; // a big white panel would wash out the glow
-    body.renderOrder = 1;
+    // A sheet of paper to draw on, with a hairline edge.
+    const body = lit(new Mesh(bodies.board(), paperMaterial()));
+    body.castShadow = false;
     inner.add(body);
-    inner.add(new LineSegments2(edges.board(), edgeMaterial('#ffffff', 3.5)));
-    inner.add(new LineSegments2(boardGrid(), edgeMaterial('#ffffff', 1, 0.18)));
-    g.add(inner);
     return g;
   }
   if (data.shape === 'slime') {
-    const body = new Mesh(bodies.sphere(), slimeMaterial(data.color));
+    const body = lit(new Mesh(bodies.sphere(), slimeMaterial(data.color)));
     body.name = 'slime';
-    body.userData.pick = true;
     inner.add(body);
-    g.add(inner);
     return g;
   }
-  const body = new Mesh(bodies[data.shape](), holoMaterial(data.color));
-  body.userData.pick = true;
-  body.renderOrder = 1;
-  inner.add(body);
-  inner.add(new LineSegments2(edges[data.shape](), edgeMaterial(data.color)));
-  if (data.hatch) inner.add(new LineSegments2(hatchGeometry(data.hatch), edgeMaterial(data.color, 2, 0.6)));
-  g.add(inner);
+  inner.add(lit(new Mesh(bodies[data.shape](), clayMaterial(data.color))));
+  if (data.hatch) {
+    // Hatching in a darker shade of the bar's own color.
+    const ink = new Color(data.color).multiplyScalar(0.45);
+    inner.add(new LineSegments2(hatchGeometry(data.hatch), lineMaterial(ink, 2.2)));
+  }
   return g;
 }
 
@@ -320,17 +213,12 @@ export function finishStroke(mesh) {
   mesh.geometry = strokeGeometry(mesh.userData.data.pts, mesh.userData.data.radius);
 }
 
-const WHITE = new Color('#fff');
-
+// Hover feedback: a warm tint on what a hand would grab, paint or erase.
 export function setHighlight(obj, on) {
   if (!obj || obj.userData.highlight === on) return;
   obj.userData.highlight = on;
   const apply = (o) => {
-    const m = o.material;
-    if (!m) return;
-    if (m.uniforms?.highlight) m.uniforms.highlight.value = on ? 1 : 0;
-    else if (m.userData.board) m.opacity = on ? 0.26 : 0.14;
-    else if (m.userData.base) m.color.copy(m.userData.base).lerp(WHITE, on ? 0.55 : 0);
+    if (o.material?.emissive) o.material.emissive.copy(HIGHLIGHT).multiplyScalar(on ? 0.28 : 0);
   };
   // Highlight the object itself but not strokes drawn on it.
   apply(obj);
@@ -342,8 +230,6 @@ export function ownerOf(o) {
   while (o && !o.userData.data) o = o.parent;
   return o;
 }
-
-// ---------------------------------------------------------------- shapes from two hands
 
 const _x = new Vector3();
 const _y = new Vector3();
@@ -392,7 +278,6 @@ export function shapeFromHands(shape, A, B, camQ, t, color) {
     sx = Math.max(sx, sy * 0.4, 0.02);
     sy = Math.max(sy, sx * 0.4, 0.02);
     dims = [sx, sy, 0.004];
-    color = '#ffffff';
   } else if (shape === 'bar') {
     alongAxis('x');
     const h = Math.max(t * 2.2, len * 0.17);
@@ -436,10 +321,9 @@ export function exportableGroup(content) {
     if (!o.isMesh || !o.userData.pick) return;
     const data = ownerOf(o).userData.data;
     const isShape = data.type === 'shape';
-    const mat = new MeshBasicMaterial({
-      color: new Color(data.color),
-      transparent: isShape,
-      opacity: isShape ? 0.6 : 1,
+    const mat = new MeshStandardMaterial({
+      color: new Color(data.shape === 'board' ? '#fbfaf7' : data.color),
+      roughness: isShape ? 0.55 : 0.4,
     });
     const m = new Mesh(o.geometry, mat);
     m.matrixAutoUpdate = false;

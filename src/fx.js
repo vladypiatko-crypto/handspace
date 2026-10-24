@@ -1,14 +1,15 @@
 import {
-  AdditiveBlending, BufferAttribute, BufferGeometry, CanvasTexture, Color, DoubleSide, Group, Mesh,
+  BufferAttribute, BufferGeometry, CanvasTexture, Color, DoubleSide, Group, Mesh,
   MeshBasicMaterial, Points, PointsMaterial, RingGeometry, SphereGeometry, Vector3,
 } from 'three';
 import { disposeObject } from './objects.js';
 
-// Visual effects: spark particles, shockwave rings, pop-in / dissolve animations
-// and glowing orbs that follow your fingertips in 3D.
+// Visual effects: little paint droplets, soft rings, pop-in / dissolve
+// animations, and markers that follow your fingertips in 3D.
 
 const MAX_PARTICLES = 1500;
 const WHITE = new Color('#fff');
+const INK = new Color('#17171a');
 
 function dotTexture() {
   const c = document.createElement('canvas');
@@ -16,7 +17,7 @@ function dotTexture() {
   const g = c.getContext('2d');
   const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
   grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.25, 'rgba(255,255,255,0.8)');
+  grad.addColorStop(0.7, 'rgba(255,255,255,1)');
   grad.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = grad;
   g.fillRect(0, 0, 64, 64);
@@ -41,12 +42,11 @@ export class Effects {
     geo.setAttribute('position', new BufferAttribute(this.pos, 3));
     geo.setAttribute('color', new BufferAttribute(this.col, 3));
     this.points = new Points(geo, new PointsMaterial({
-      size: 0.012,
+      size: 0.006,
       map: dotTexture(),
       vertexColors: true,
       transparent: true,
-      depthWrite: false,
-      blending: AdditiveBlending,
+      alphaTest: 0.5,
     }));
     this.points.frustumCulled = false;
     this.group.add(this.points);
@@ -56,13 +56,13 @@ export class Effects {
     this.anims = [];
 
     // Fingertip orbs.
-    const orbGeo = new SphereGeometry(1, 20, 14);
-    const ringGeo = new RingGeometry(1.5, 1.9, 40);
+    const orbGeo = new SphereGeometry(1, 24, 16);
+    const ringGeo = new RingGeometry(1.45, 1.75, 48);
     this.cursors = [0, 1].map(() => {
       const g = new Group();
-      const orb = new Mesh(orbGeo, new MeshBasicMaterial({ color: '#fff', transparent: true, opacity: 0.9 }));
+      const orb = new Mesh(orbGeo, new MeshBasicMaterial({ color: '#fff', toneMapped: false }));
       const ring = new Mesh(ringGeo, new MeshBasicMaterial({
-        color: '#fff', transparent: true, side: DoubleSide, blending: AdditiveBlending, depthWrite: false,
+        color: '#fff', transparent: true, side: DoubleSide, depthWrite: false, toneMapped: false,
       }));
       g.add(orb, ring);
       g.userData = { orb, ring, spin: 0 };
@@ -73,7 +73,9 @@ export class Effects {
   }
 
   emit(at, color, count = 12, speed = 0.25, life = 0.8) {
-    const c = new Color(color).lerp(new Color('#fff'), 0.3);
+    const c = new Color(color);
+    count = Math.ceil(count * 0.6);
+    speed *= 0.6;
     for (let k = 0; k < count; k++) {
       const i = this.next;
       this.next = (this.next + 1) % MAX_PARTICLES;
@@ -84,16 +86,15 @@ export class Effects {
       const r = Math.sqrt(1 - u * u);
       const s = speed * (0.3 + Math.random() * 0.7);
       this.vel.set([r * Math.cos(a) * s, r * Math.sin(a) * s, u * s], i * 3);
-      const tint = 0.6 + Math.random() * 0.8;
+      const tint = 0.85 + Math.random() * 0.3;
       this.baseCol.set([c.r * tint, c.g * tint, c.b * tint], i * 3);
       this.life[i] = this.maxLife[i] = life * (0.5 + Math.random() * 0.5);
     }
   }
 
   ripple(at, color, camera, size = 0.15) {
-    const m = new Mesh(new RingGeometry(0.9, 1, 64), new MeshBasicMaterial({
-      color: new Color(color), transparent: true, side: DoubleSide,
-      blending: AdditiveBlending, depthWrite: false,
+    const m = new Mesh(new RingGeometry(0.96, 1, 64), new MeshBasicMaterial({
+      color: '#ffffff', transparent: true, side: DoubleSide, depthWrite: false, toneMapped: false,
     }));
     m.position.copy(at);
     m.quaternion.copy(camera.quaternion);
@@ -125,19 +126,19 @@ export class Effects {
   // hands: Hand[]; color: current color; brush: stroke radius (m); camera: the AR camera.
   update(dt, t, hands, color, brush, camera) {
     this.brush = brush;
-    // Particles
-    const drag = Math.exp(-2.5 * dt);
+    // Droplets: fly out, fall, and vanish when their time is up.
+    const drag = Math.exp(-2 * dt);
     for (let i = 0; i < MAX_PARTICLES; i++) {
       if (this.life[i] <= 0) continue;
       this.life[i] -= dt;
-      const k = Math.max(0, this.life[i] / this.maxLife[i]);
+      if (this.life[i] <= 0) { this.pos[i * 3 + 1] = -1e4; continue; }
       for (let j = 0; j < 3; j++) {
         const n = i * 3 + j;
         this.vel[n] *= drag;
         this.pos[n] += this.vel[n] * dt;
-        this.col[n] = this.baseCol[n] * k * k;
+        this.col[n] = this.baseCol[n];
       }
-      this.vel[i * 3 + 1] += 0.05 * dt; // sparks drift up a little
+      this.vel[i * 3 + 1] -= 1.6 * dt; // gravity
     }
     this.points.geometry.attributes.position.needsUpdate = true;
     this.points.geometry.attributes.color.needsUpdate = true;
@@ -147,8 +148,8 @@ export class Effects {
       r.t += dt;
       const k = r.t / 0.6;
       if (k >= 1) { r.m.removeFromParent(); r.m.geometry.dispose(); r.m.material.dispose(); return false; }
-      r.m.scale.setScalar(r.size * (0.2 + k * 1.3));
-      r.m.material.opacity = (1 - k) ** 2;
+      r.m.scale.setScalar(r.size * (0.3 + k * 0.9));
+      r.m.material.opacity = 0.8 * (1 - k) ** 2;
       return true;
     });
 
@@ -173,11 +174,11 @@ export class Effects {
       cur.position.copy(h.cursorWorld);
       cur.quaternion.copy(camera.quaternion);
       cur.scale.setScalar(h.drawing ? Math.max(0.004, this.brush * 1.1) : active ? 0.007 : 0.005);
-      orb.material.color.copy(c).lerp(WHITE, active ? 0.6 : 0.2);
-      ring.material.color.copy(c);
-      ring.material.opacity = active ? 1 : 0.5;
-      ring.rotation.z = t * 2;
-      ring.scale.setScalar(active ? 0.75 + Math.sin(t * 10) * 0.08 : 1.2);
+      // Drawing: a dot of the current color. Otherwise a small white marker.
+      orb.material.color.copy(h.drawing ? c : WHITE);
+      ring.material.color.copy(h.drawing ? WHITE : INK);
+      ring.material.opacity = active ? 0.9 : 0.45;
+      ring.scale.setScalar(active ? 0.9 : 1.15);
     });
   }
 }

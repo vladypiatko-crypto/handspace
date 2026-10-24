@@ -33,6 +33,7 @@ export class Physics {
     this.bodies = new WeakMap();
     this.dirty = false;
     this.heldBefore = new Set();
+    this.awake = 0; // objects still moving (0 = everything at rest)
   }
 
   body(o) {
@@ -110,7 +111,7 @@ export class Physics {
     const sxz = 1 / Math.sqrt(Math.max(1 + j.y, 0.3));
     inner.scale.set(dims[0] * sxz * (1 + Math.abs(j.x) * 0.8), dims[1] * sy, dims[2] * sxz * (1 + Math.abs(j.z) * 0.8));
     const body = inner.getObjectByName('slime');
-    if (body) body.material.uniforms.wobble.value = Math.min(1, b.jellyVel.length() * 0.6 + b.jelly.length());
+    if (body) body.material.userData.wobble.value = Math.min(1, b.jellyVel.length() * 0.6 + b.jelly.length());
   }
 
   // held: objects being held or drawn right now. view: camera intrinsics.
@@ -122,6 +123,7 @@ export class Physics {
     // The "floor" is a little above the bottom of the view at hand distance.
     const floorY = -0.45 * (H / 2 / f) * 0.78;
     const halfW = (W / 2) / f;
+    this.floorY = floorY;
 
     let awake = 0;
     for (const o of movers) {
@@ -217,6 +219,7 @@ export class Physics {
       }
     }
 
+    this.awake = awake;
     // Save once everything has come to rest.
     if (!awake && this.dirty) {
       this.dirty = false;

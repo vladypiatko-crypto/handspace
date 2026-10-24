@@ -82,10 +82,10 @@ export class Eater {
     if (o.userData.bites >= BITES) {
       this.tools.forget(o);
       this.fx.dissolve(o, color);
-      this.onBite('Nom nom! 😋 All gone');
+      this.onBite('Nom nom. All gone');
     } else {
       o.scale.multiplyScalar(0.68);
-      this.onBite(`Chomp! ${'🍪'.repeat(BITES - o.userData.bites)} left`);
+      this.onBite(`Chomp! ${BITES - o.userData.bites} bite${BITES - o.userData.bites === 1 ? '' : 's'} left`);
     }
     this.store.commit();
   }

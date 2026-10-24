@@ -3,60 +3,102 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-  <meta name="theme-color" content="#111317" />
+  <meta name="theme-color" content="#f3f1ec" />
   <title>HandSpace</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <!-- Loaded without blocking the page; system fonts are used until (or if) it arrives. -->
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Space+Grotesk:wght@400;500;600&display=swap" media="print" onload="this.media='all'" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap" media="print" onload="this.media='all'" />
   <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
   <!-- Start screen: choose where the camera comes from -->
   <section id="start" class="screen">
-    <div class="start-card">
-      <h1><span class="logo">✋</span><span class="title">HandSpace</span></h1>
-      <p class="lead">Pinch and pull in the air to draw and build 3D objects. Your camera tracks your hands, face and body.</p>
+    <header class="brand">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="5" y="13" width="22" height="6" rx="3" fill="currentColor" />
+        <circle cx="6" cy="16" r="4.5" fill="none" stroke="currentColor" stroke-width="2" />
+        <circle cx="26" cy="16" r="4.5" fill="none" stroke="currentColor" stroke-width="2" />
+      </svg>
+      HandSpace
+    </header>
+
+    <main class="start-main">
+      <div class="hero">
+        <p class="eyebrow">A sketchbook for the space around you</p>
+        <h1>Draw in the air.<br /><em>Build with your hands.</em></h1>
+        <p class="lead">Point to draw, pinch to grab, pull apart to make a canvas. Works with any camera, nothing to install.</p>
+      </div>
+
+      <figure class="sketch" aria-hidden="true">
+        <svg viewBox="0 0 400 160">
+          <defs>
+            <clipPath id="bar-clip"><rect class="bar-shape" x="90" y="66" width="220" height="28" rx="14" /></clipPath>
+          </defs>
+          <rect class="bar-shape bar-fill" x="90" y="66" width="220" height="28" rx="14" />
+          <g clip-path="url(#bar-clip)" class="hatch">
+            <path d="M80 100 L110 60 M100 100 L130 60 M120 100 L150 60 M140 100 L170 60 M160 100 L190 60 M180 100 L210 60 M200 100 L230 60 M220 100 L250 60 M240 100 L270 60 M260 100 L290 60 M280 100 L310 60 M300 100 L330 60" />
+          </g>
+          <g class="pinch left">
+            <path d="M92 58 C 70 58, 62 72, 70 80" />
+            <path d="M92 102 C 70 102, 62 88, 70 80" />
+            <circle cx="90" cy="80" r="5" />
+          </g>
+          <g class="pinch right">
+            <path d="M308 58 C 330 58, 338 72, 330 80" />
+            <path d="M308 102 C 330 102, 338 88, 330 80" />
+            <circle cx="310" cy="80" r="5" />
+          </g>
+        </svg>
+        <figcaption>Pinch with both hands, pull apart</figcaption>
+      </figure>
+
       <div class="choices">
         <button class="choice" data-start="local">
-          <strong>Use this device's camera</strong>
-          <span>Webcam on a PC, or the front/back camera of a phone or tablet.</span>
+          <span class="choice-icon" data-icon="camera" data-icon-size="22"></span>
+          <span class="choice-text"><strong>Use this camera</strong><span>Your webcam, or the front or back camera of a phone or tablet.</span></span>
+          <span class="go" data-icon="arrow"></span>
         </button>
         <button class="choice" data-start="receive">
-          <strong>Use my phone as the camera</strong>
-          <span>Open on your PC. It shows a code and QR code to pair a phone.</span>
+          <span class="choice-icon" data-icon="monitor" data-icon-size="22"></span>
+          <span class="choice-text"><strong>Use my phone as the camera</strong><span>Open this on your computer. It shows a code for your phone.</span></span>
+          <span class="go" data-icon="arrow"></span>
         </button>
         <button class="choice" data-start="send">
-          <strong>Send this camera to another screen</strong>
-          <span>Open on your phone. Enter the code shown on your PC.</span>
+          <span class="choice-icon" data-icon="phone" data-icon-size="22"></span>
+          <span class="choice-text"><strong>Send this phone's camera</strong><span>Open this on your phone and enter the code from your computer.</span></span>
+          <span class="go" data-icon="arrow"></span>
         </button>
       </div>
-      <p class="hint">Everything runs in your browser. Video goes straight between your own devices and is never uploaded.</p>
-    </div>
+      <p class="fineprint">Everything runs in your browser. Video goes straight between your own devices and is never uploaded.</p>
+    </main>
   </section>
 
-  <!-- Sender screen (phone streaming its camera to a PC) -->
+  <!-- Sender screen (phone streaming its camera to a computer) -->
   <section id="sender" class="screen hidden">
     <video id="sender-video" autoplay playsinline muted></video>
-    <div class="sender-panel">
-      <h2>Phone camera</h2>
-      <p class="status">This phone becomes the camera. Your PC does the tracking and shows everything.</p>
-      <label>Pairing code
+    <div class="sheet sender-panel">
+      <div class="sheet-head">
+        <h2>Phone camera</h2>
+        <button id="sender-back" class="icon-btn" data-icon="close" aria-label="Back"></button>
+      </div>
+      <p class="muted">This phone is the camera. Your computer does the tracking and shows everything.</p>
+      <label class="field">
+        <span>Pairing code</span>
         <input id="sender-code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC123" />
       </label>
       <div class="row">
-        <button id="sender-connect" class="primary">Connect</button>
-        <button id="sender-flip">Flip camera</button>
-        <button id="sender-dim" title="Black out this screen to save battery; tap to wake">Dim screen</button>
+        <button id="sender-connect" class="btn primary">Connect</button>
+        <button id="sender-flip" class="btn" data-icon="flip" data-icon-size="18">Flip</button>
+        <button id="sender-dim" class="btn" data-icon="moon" data-icon-size="18">Dim</button>
       </div>
-      <label class="check"><input type="checkbox" id="sender-motion" checked /> Send phone motion (keeps objects in place when you turn the phone)</label>
+      <label class="switch"><input type="checkbox" id="sender-motion" checked /><span>Send phone motion, so things stay put when you turn it</span></label>
       <p id="sender-status" class="status">Not connected</p>
-      <button id="sender-back" class="link">← Back</button>
     </div>
   </section>
 
-  <div id="dim" class="hidden"><span>Streaming camera · tap to wake</span></div>
+  <div id="dim" class="hidden"><span>Camera is streaming · tap to wake</span></div>
 
   <!-- Main app -->
   <section id="app" class="screen hidden">
@@ -67,96 +109,106 @@
     </div>
 
     <div id="hud">
-      <div id="hud-status">Loading models…</div>
+      <div id="hud-status">Loading…</div>
       <div id="hud-detail"></div>
     </div>
     <div id="hud-right"><span id="fps"></span></div>
     <div id="toast" class="hidden"></div>
     <div id="palm-menu" class="hidden"></div>
 
-    <!-- Pairing panel shown on the PC while waiting for a phone -->
-    <div id="pair" class="panel hidden">
+    <!-- Pairing card shown on the computer while waiting for a phone -->
+    <div id="pair" class="card hidden">
       <h2>Pair your phone</h2>
-      <p>On your phone, scan this QR code, or open this page and choose <em>Send this camera to another screen</em>.</p>
+      <p class="muted">Scan the code with your phone's camera, or open this site on your phone, choose <em>Send this phone's camera</em> and type the code.</p>
       <canvas id="pair-qr"></canvas>
       <div class="code" id="pair-code">······</div>
-      <p id="pair-status" class="status">Waiting for phone…</p>
-      <button id="pair-cancel" class="link">Use this device's camera instead</button>
+      <p id="pair-status" class="status">Waiting for your phone…</p>
+      <button id="pair-cancel" class="btn ghost">Use this computer's camera instead</button>
     </div>
 
     <nav id="toolbar">
-      <div class="group" id="tools">
-        <button data-tool="create" class="active" title="Create (C): point to draw, pinch to move, pinch both hands for shapes">✋<span>Create</span></button>
-        <button data-tool="paint" title="Paint (P): pinch or point at an object to recolor it">🎨<span>Paint</span></button>
-        <button data-tool="erase" title="Erase (E): pinch or point and sweep over things">🧽<span>Erase</span></button>
+      <div class="group seg" id="tools">
+        <button data-tool="create" class="active" title="Create (C): point to draw, pinch to grab, pinch both hands for an area" data-icon="create"><span>Create</span></button>
+        <button data-tool="paint" title="Paint (P): point at or pinch an object to recolor it" data-icon="paint"><span>Paint</span></button>
+        <button data-tool="erase" title="Erase (E): point or pinch and sweep over things" data-icon="erase"><span>Erase</span></button>
       </div>
       <div class="group" id="shapes">
-        <button data-shape="board" class="active" title="Drawing area: pinch both hands to mark its corners">⬜</button>
-        <button data-shape="slime" title="Slime">🟢</button>
-        <button data-shape="bar" title="Hatched bar">▭</button>
-        <button data-shape="box" title="Box">◻︎</button>
-        <button data-shape="sphere" title="Sphere">◯</button>
-        <button data-shape="cylinder" title="Cylinder">⌭</button>
-        <button data-shape="cone" title="Cone">△</button>
-        <button data-shape="torus" title="Ring">◎</button>
+        <button data-shape="board" class="active" title="Drawing area" data-icon="board"></button>
+        <button data-shape="slime" title="Slime" data-icon="slime"></button>
+        <button data-shape="bar" title="Hatched bar" data-icon="bar"></button>
+        <button data-shape="box" title="Box" data-icon="box"></button>
+        <button data-shape="sphere" title="Sphere" data-icon="sphere"></button>
+        <button data-shape="cylinder" title="Cylinder" data-icon="cylinder"></button>
+        <button data-shape="cone" title="Cone" data-icon="cone"></button>
+        <button data-shape="torus" title="Ring" data-icon="torus"></button>
       </div>
       <div class="group" id="colors"></div>
       <div class="group">
-        <input type="range" id="size" min="2" max="30" value="8" title="Line / shape thickness" />
+        <input type="range" id="size" min="2" max="30" value="8" title="Line and shape thickness" />
       </div>
       <div class="group">
-        <button id="physics-btn" title="Gravity: things fall, bounce and can be thrown">🍎<span>Gravity</span></button>
-        <button id="stick-btn" title="Stick: draw on or drop things onto your face, hands or real objects">📌<span>Stick</span></button>
+        <button id="physics-btn" class="toggle" title="Gravity: things fall, bounce and can be thrown" data-icon="gravity"><span>Gravity</span></button>
+        <button id="stick-btn" class="toggle" title="Stick things to your face, hands and real objects" data-icon="stick"><span>Stick</span></button>
       </div>
       <div class="group">
-        <button id="undo" title="Undo (Z) — or hold a fist">↶</button>
-        <button id="redo" title="Redo (Y)">↷</button>
-        <button id="menu-btn" title="Menu">☰</button>
+        <button id="undo" title="Undo (Z), or hold a fist" data-icon="undo"></button>
+        <button id="redo" title="Redo (Y)" data-icon="redo"></button>
+        <button id="menu-btn" title="Settings (M)" data-icon="menu"></button>
       </div>
     </nav>
 
-    <div id="menu" class="panel hidden">
-      <h2>Settings</h2>
-      <label class="check"><input type="checkbox" data-setting="physics" /> Gravity (things fall, bounce, can be thrown)</label>
-      <label class="check"><input type="checkbox" data-setting="stick" /> Stick things to your face, hands and real objects</label>
-      <label class="check"><input type="checkbox" data-setting="eat" /> Eat things (bring them to your mouth, open, close)</label>
-      <label class="check"><input type="checkbox" data-setting="wristRotate" /> Twist your wrist to rotate what you hold</label>
-      <label class="check"><input type="checkbox" data-setting="showSkeleton" /> Show hand skeleton</label>
-      <label class="check"><input type="checkbox" data-setting="glow" /> Glow effects (turn off if slow)</label>
-      <label class="check"><input type="checkbox" data-setting="face" /> Track face (expressions)</label>
-      <label class="check"><input type="checkbox" data-setting="pose" /> Track body pose</label>
-      <label class="check"><input type="checkbox" data-setting="mirror" /> Mirror view</label>
-      <label class="check"><input type="checkbox" data-setting="motion" /> Lock objects to the room (uses phone motion)</label>
-      <label class="check"><input type="checkbox" data-setting="freeView" /> Free 3D view (orbit with mouse/touch)</label>
-      <label class="check"><input type="checkbox" data-setting="pointerHand" /> Mouse/touch acts as a hand</label>
-      <label>Camera field of view <span id="fov-val"></span>
+    <div id="menu" class="card wide hidden">
+      <div class="sheet-head">
+        <h2>Settings</h2>
+        <button id="menu-close" class="icon-btn" data-icon="close" aria-label="Close"></button>
+      </div>
+
+      <h3>Play</h3>
+      <label class="switch"><input type="checkbox" data-setting="physics" /><span>Gravity: things fall, bounce and can be thrown</span></label>
+      <label class="switch"><input type="checkbox" data-setting="stick" /><span>Stick things to your face, hands and real objects</span></label>
+      <label class="switch"><input type="checkbox" data-setting="eat" /><span>Eat things: bring them to your mouth, open, close</span></label>
+      <label class="switch"><input type="checkbox" data-setting="wristRotate" /><span>Twist your wrist to turn what you hold</span></label>
+
+      <h3>Tracking</h3>
+      <label class="switch"><input type="checkbox" data-setting="showSkeleton" /><span>Show hand outlines</span></label>
+      <label class="switch"><input type="checkbox" data-setting="face" /><span>Show face and expressions</span></label>
+      <label class="switch"><input type="checkbox" data-setting="pose" /><span>Track body</span></label>
+
+      <h3>Camera and view</h3>
+      <label class="switch"><input type="checkbox" data-setting="saver" /><span>Battery saver: lighter camera, 30 fps, keeps phones cool</span></label>
+      <label class="switch"><input type="checkbox" data-setting="mirror" /><span>Mirror view</span></label>
+      <label class="switch"><input type="checkbox" data-setting="motion" /><span>Keep things in place when the phone turns</span></label>
+      <label class="switch"><input type="checkbox" data-setting="freeView" /><span>3D view: orbit around your work</span></label>
+      <label class="switch"><input type="checkbox" data-setting="pointerHand" /><span>Use the mouse or touch as a hand</span></label>
+      <label class="field">
+        <span>Camera field of view <b id="fov-val"></b></span>
         <input type="range" data-setting="fov" min="40" max="100" step="1" />
       </label>
-      <div class="row wrap">
-        <button id="recenter">Recenter view</button>
-        <button id="flip-cam">Flip camera</button>
-        <button id="export-json">Save file</button>
-        <button id="import-json">Open file</button>
-        <button id="export-glb">Export 3D model (.glb)</button>
-        <button id="clear" class="danger">Clear all</button>
-        <button id="home">Change camera source</button>
+
+      <div class="actions">
+        <button id="recenter" class="btn">Recenter</button>
+        <button id="flip-cam" class="btn">Flip camera</button>
+        <button id="export-json" class="btn">Save file</button>
+        <button id="import-json" class="btn">Open file</button>
+        <button id="export-glb" class="btn">Export .glb</button>
+        <button id="home" class="btn">Change camera</button>
+        <button id="clear" class="btn danger">Clear all</button>
       </div>
+
       <details>
         <summary>Gestures</summary>
         <ul class="gestures">
-          <li><b>☝️ Point</b> (index finger straight, others folded) to draw in the air.</li>
-          <li><b>🤏 Pinch</b> something to grab it and move it. <b>Twist your wrist</b> to turn it.</li>
-          <li><b>Pinch it with both hands</b> to scale and rotate it.</li>
-          <li><b>🤏🤏 Pinch both hands in empty space and pull apart</b> to mark a white drawing area (or another shape from the shape picker). Point at the area to draw on it.</li>
-          <li><b>✋ Hold your open palm up</b> for a second to open the menu around your hand. <b>Pinch</b> an item to choose it. Pinching any button on screen presses it, so you never need to click.</li>
-          <li><b>Hold a fist ✊</b> to undo. <b>Hold ✌️</b> for the next shape.</li>
-          <li><b>🍎 Gravity:</b> let go while moving to throw. Slime squishes and splats.</li>
-          <li><b>📌 Stick:</b> draw on your face, hand or a recognized object (cup, phone, bottle…), or drop something onto it, and it sticks and moves with it. Grab it to pull it off.</li>
-          <li><b>😋 Eat:</b> bring something to your mouth, open wide, then close. Three bites and it's gone.</li>
-          <li><b>Mouse/touch:</b> drag to draw, drag an object to move it, Shift-drag or right-drag for a shape, Alt-drag to draw on an object, scroll for depth.</li>
+          <li><b>Point</b> with your index finger (others folded) to draw in the air.</li>
+          <li><b>Pinch</b> something to grab and move it. <b>Twist your wrist</b> to turn it. Pinch it with both hands to scale and rotate.</li>
+          <li><b>Pinch both hands in empty space and pull apart</b> to make a drawing area (or the shape picked in the toolbar). Point at it to draw on it.</li>
+          <li><b>Hold an open palm up</b> for a second to open the menu around your hand, then pinch an item. Pinching any button on screen presses it.</li>
+          <li><b>Hold a fist</b> to undo. <b>Hold a peace sign</b> for the next shape.</li>
+          <li><b>Gravity:</b> let go while moving to throw. Slime squishes and splats.</li>
+          <li><b>Stick:</b> draw on or drop things onto your face, hand or a recognized object, and they move with it. Grab to pull off.</li>
+          <li><b>Eat:</b> bring something to your mouth, open wide, then close. Three bites.</li>
+          <li><b>Mouse:</b> drag to draw, drag an object to move it, Shift-drag for a shape, Alt-drag to draw on objects, scroll for depth.</li>
         </ul>
       </details>
-      <button id="menu-close" class="primary">Done</button>
       <input type="file" id="file-input" accept=".json,application/json" hidden />
     </div>
   </section>

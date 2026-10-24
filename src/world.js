@@ -1,20 +1,22 @@
 import {
-  Color, Fog, GridHelper, Group, PerspectiveCamera, Raycaster, Scene, SRGBColorSpace, Vector2, Vector3,
-  VideoTexture, WebGLRenderer, NoToneMapping, RepeatWrapping, HalfFloatType, WebGLRenderTarget,
+  Box3, Color, Fog, GridHelper, Group, PerspectiveCamera, Raycaster, Scene, SRGBColorSpace, Vector2, Vector3,
+  VideoTexture, WebGLRenderer, NoToneMapping, RepeatWrapping, HalfFloatType, WebGLRenderTarget, ShaderMaterial,
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { holoTime, setLineResolution, ownerOf } from './objects.js';
 
 // The 3D world. The camera feed is drawn as the background, and the virtual
 // camera uses the same field of view as the real one, so 3D points line up
 // exactly with your fingers on screen.
 //
-// Bloom only picks up colors brighter than 1.0. The camera feed never goes
-// above 1.0, so only the neon objects glow.
+// Selective bloom: the 3D objects are rendered once on black and blurred into
+// a glow layer, which is then added over the normal render. That way only the
+// neon objects glow, never the camera feed.
 
 export class World {
   constructor(canvas, video) {
@@ -42,19 +44,39 @@ export class World {
     this.controls.target.set(0, 0, -0.5);
     this.controls.enableDamping = true;
     this.controls.enabled = false;
-    this.grid = new GridHelper(4, 40, new Color('#4fd1c5').multiplyScalar(1.6), new Color('#2a3f5f'));
+    this.grid = new GridHelper(4, 40, new Color('#4fd1c5'), new Color('#24364f'));
     this.grid.position.set(0, -0.4, -0.5);
     this.grid.visible = false;
     this.scene.add(this.grid);
     this.free = false;
 
-    const target = new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples: 4 });
-    this.composer = new EffectComposer(this.renderer, target);
+    this.bloomComposer = new EffectComposer(this.renderer, new WebGLRenderTarget(1, 1, { type: HalfFloatType }));
+    this.bloomComposer.renderToScreen = false;
+    this.bloomRender = new RenderPass(this.scene, this.camera);
+    this.bloom = new UnrealBloomPass(new Vector2(256, 256), 0.8, 0.3, 0);
+    this.bloomComposer.addPass(this.bloomRender);
+    this.bloomComposer.addPass(this.bloom);
+
+    this.composer = new EffectComposer(this.renderer, new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples: 4 }));
     this.renderPass = new RenderPass(this.scene, this.camera);
-    this.bloom = new UnrealBloomPass(new Vector2(256, 256), 0.9, 0.55, 1.0);
+    const mix = new ShaderPass(new ShaderMaterial({
+      uniforms: { baseTexture: { value: null }, bloomTexture: { value: this.bloomComposer.renderTarget2.texture } },
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: `
+        uniform sampler2D baseTexture;
+        uniform sampler2D bloomTexture;
+        varying vec2 vUv;
+        void main() {
+          vec4 base = texture2D(baseTexture, vUv);
+          vec3 glow = texture2D(bloomTexture, vUv).rgb;
+          // Screen blend: glow brightens without blowing bright camera areas out to white.
+          gl_FragColor = vec4(base.rgb + glow * max(vec3(0.0), 1.0 - base.rgb), base.a);
+        }`,
+    }), 'baseTexture');
     this.composer.addPass(this.renderPass);
-    this.composer.addPass(this.bloom);
+    this.composer.addPass(mix);
     this.composer.addPass(new OutputPass());
+    this.black = new Color('#000');
     this.glow = true;
 
     this.raycaster = new Raycaster();
@@ -78,20 +100,36 @@ export class World {
   resize(w, h, pr) {
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h, false);
-    this.composer.setPixelRatio(pr);
-    this.composer.setSize(w, h);
+    for (const c of [this.composer, this.bloomComposer]) {
+      c.setPixelRatio(pr);
+      c.setSize(w, h);
+    }
     this.freeCam.aspect = w / h;
     this.freeCam.updateProjectionMatrix();
     setLineResolution(w * pr, h * pr);
   }
 
   setFree(on) {
+    if (on) this.frameContent();
     this.free = on;
     this.controls.enabled = on;
     this.grid.visible = on;
     this.scene.background = on ? new Color('#07090d') : this.videoTex;
-    this.scene.fog = on ? new Fog('#07090d', 1.5, 5) : null;
-    this.renderPass.camera = on ? this.freeCam : this.camera;
+    this.scene.fog = on ? new Fog('#07090d', 2, 6) : null;
+    this.renderPass.camera = this.bloomRender.camera = on ? this.freeCam : this.camera;
+  }
+
+  // Points the free-view camera at everything you've made, from a slight angle.
+  frameContent() {
+    const box = new Box3().setFromObject(this.content);
+    if (box.isEmpty()) box.set(new Vector3(-0.2, -0.2, -0.7), new Vector3(0.2, 0.2, -0.3));
+    const center = box.getCenter(new Vector3());
+    const size = Math.max(box.getSize(new Vector3()).length(), 0.2);
+    this.controls.target.copy(center);
+    this.freeCam.position.copy(center).add(new Vector3(0.45, 0.35, 0.85).multiplyScalar(size));
+    this.freeCam.lookAt(center);
+    this.grid.position.set(center.x, box.min.y - 0.05, center.z);
+    this.controls.update();
   }
 
   get viewCamera() {
@@ -102,8 +140,16 @@ export class World {
     holoTime.value += dt;
     if (this.free) this.controls.update();
     this.camera.updateMatrixWorld();
-    if (this.glow) this.composer.render(dt);
-    else this.renderer.render(this.scene, this.viewCamera);
+    if (!this.glow) return this.renderer.render(this.scene, this.viewCamera);
+    const { background, fog } = this.scene;
+    this.scene.background = this.black;
+    this.scene.fog = null;
+    this.grid.visible = false;
+    this.bloomComposer.render(dt);
+    this.scene.background = background;
+    this.scene.fog = fog;
+    this.grid.visible = this.free;
+    this.composer.render(dt);
   }
 
   // Ray from the AR camera through a world point (e.g. a pinch point).

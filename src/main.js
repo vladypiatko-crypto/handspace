@@ -61,10 +61,15 @@ let sender = null;
 let trackerReady = false;
 let trackerStarted = false;
 let lastResult = null;
+let autoPointer = false; // mouse-as-hand was switched on because there was no camera
 const remote = { facing: 'user', q: new Quaternion(), baseInv: new Quaternion(), has: false, needsRecenter: true };
 
 // Expose for debugging and automated tests.
-window.handspace = { settings, world, store, tools, handInput, tracker, remote };
+window.handspace = {
+  settings, world, store, tools, handInput, tracker, remote,
+  get sender() { return sender; },
+  get senderMotion() { return senderMotion; },
+};
 
 // ------------------------------------------------------------------ helpers
 
@@ -144,10 +149,11 @@ async function useLocalCamera() {
     await videoReady(video);
     await video.play().catch(() => {});
     setSetting('mirror', facing === 'user');
-    if (settings.pointerHand) setSetting('pointerHand', false);
+    if (autoPointer) { autoPointer = false; setSetting('pointerHand', false); }
   } catch (err) {
     console.warn(err);
     toast('No camera available — use your mouse or finger as a hand');
+    autoPointer = !settings.pointerHand;
     setSetting('pointerHand', true);
   }
   layout();
@@ -546,13 +552,16 @@ async function senderConnect() {
   if (code.length !== 6) { $('#sender-status').textContent = 'Enter the 6-character code shown on your PC.'; return; }
   if (!senderStream) await restartSenderCamera();
   if (!senderStream) return;
-  if ($('#sender-motion').checked) await senderMotion.start();
+  let motionNote = '';
+  if ($('#sender-motion').checked && !(await senderMotion.start())) {
+    motionNote = ' (motion sensors blocked, so objects won\'t follow phone turns)';
+  }
   sender?.destroy();
   sender = new Sender({
     onStatus: (status, detail) => {
       const text = {
         connecting: 'Connecting…',
-        connected: 'Connected — look at your PC screen ✨',
+        connected: `Connected — look at your PC screen ✨${motionNote}`,
         lost: 'Disconnected',
         error: `Problem: ${detail}`,
       }[status];

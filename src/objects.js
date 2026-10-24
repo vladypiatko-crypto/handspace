@@ -28,9 +28,11 @@ export function setLineResolution(w, h) {
   for (const m of lineMaterials) m.resolution.set(w, h);
 }
 
-// HDR color: values above 1 are picked up by the bloom pass and glow.
-function glow(color, k, whiten = 0) {
-  return new Color(color).lerp(new Color('#fff'), whiten).multiplyScalar(k);
+// A bright "neon tube" version of a color: a bit whiter in the core, and
+// scaled so its brightest channel is 1 (dark colors still glow).
+function glow(color, whiten = 0) {
+  const c = new Color(color).lerp(new Color('#fff'), whiten);
+  return c.multiplyScalar(1 / Math.max(c.r, c.g, c.b, 0.05));
 }
 
 // ---------------------------------------------------------------- materials
@@ -62,8 +64,9 @@ const holoFragment = /* glsl */ `
     float rim = pow(1.0 - facing, 2.2);
     float scan = smoothstep(0.75, 1.0, sin(vW.y * 260.0 - time * 3.0));
     float pulse = 0.5 + 0.5 * sin(time * 2.0);
-    vec3 c = color * (0.18 + rim * 2.2 + scan * 0.25 + highlight * (0.6 + pulse * 0.6));
-    float a = opacity * (0.22 + rim * 0.78 + scan * 0.1 + highlight * 0.25);
+    vec3 c = color * (0.12 + rim * 1.2 + scan * 0.15 + highlight * (0.15 + pulse * 0.25));
+    c = min(c, vec3(1.0));
+    float a = opacity * (0.14 + rim * 0.86 + scan * 0.08 + highlight * 0.15);
     gl_FragColor = vec4(c, clamp(a, 0.0, 1.0));
   }
 `;
@@ -71,7 +74,7 @@ const holoFragment = /* glsl */ `
 function holoMaterial(color) {
   return new ShaderMaterial({
     uniforms: {
-      color: { value: new Color(color) },
+      color: { value: glow(color) },
       time: holoTime,
       highlight: { value: 0 },
       opacity: { value: 0.85 },
@@ -84,8 +87,8 @@ function holoMaterial(color) {
   });
 }
 
-function edgeMaterial(color, width = 2.5) {
-  const m = new LineMaterial({ color: glow(color, 2.6, 0.25), linewidth: width, transparent: true });
+function edgeMaterial(color, width = 2.5, brightness = 1) {
+  const m = new LineMaterial({ color: glow(color, 0.2).multiplyScalar(brightness), linewidth: width, transparent: true });
   m.resolution.set(lineResolution.x, lineResolution.y);
   m.userData.base = m.color.clone();
   lineMaterials.add(m);
@@ -93,7 +96,7 @@ function edgeMaterial(color, width = 2.5) {
 }
 
 function strokeMaterial(color) {
-  const m = new MeshBasicMaterial({ color: glow(color, 2.2, 0.2) });
+  const m = new MeshBasicMaterial({ color: glow(color) });
   m.userData.base = m.color.clone();
   return m;
 }
@@ -183,7 +186,7 @@ function buildShape(data) {
   body.renderOrder = 1;
   inner.add(body);
   inner.add(new LineSegments2(edges[data.shape](), edgeMaterial(data.color)));
-  if (data.hatch) inner.add(new LineSegments2(hatchGeometry(data.hatch), edgeMaterial(data.color, 2)));
+  if (data.hatch) inner.add(new LineSegments2(hatchGeometry(data.hatch), edgeMaterial(data.color, 2, 0.6)));
   g.add(inner);
   return g;
 }
@@ -223,6 +226,8 @@ export function setStrokePoints(mesh, pts) {
   mesh.geometry = strokeGeometry(pts, mesh.userData.data.radius);
 }
 
+const WHITE = new Color('#fff');
+
 export function setHighlight(obj, on) {
   if (!obj || obj.userData.highlight === on) return;
   obj.userData.highlight = on;
@@ -230,7 +235,7 @@ export function setHighlight(obj, on) {
     const m = o.material;
     if (!m) return;
     if (m.uniforms?.highlight) m.uniforms.highlight.value = on ? 1 : 0;
-    else if (m.userData.base) m.color.copy(m.userData.base).multiplyScalar(on ? 1.9 : 1);
+    else if (m.userData.base) m.color.copy(m.userData.base).lerp(WHITE, on ? 0.55 : 0);
   };
   // Highlight the object itself but not strokes drawn on it.
   apply(obj);

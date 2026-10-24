@@ -8,6 +8,7 @@ import { disposeObject } from './objects.js';
 // and glowing orbs that follow your fingertips in 3D.
 
 const MAX_PARTICLES = 1500;
+const WHITE = new Color('#fff');
 
 function dotTexture() {
   const c = document.createElement('canvas');
@@ -72,7 +73,7 @@ export class Effects {
   }
 
   emit(at, color, count = 12, speed = 0.25, life = 0.8) {
-    const c = new Color(color).multiplyScalar(2.5);
+    const c = new Color(color).lerp(new Color('#fff'), 0.3);
     for (let k = 0; k < count; k++) {
       const i = this.next;
       this.next = (this.next + 1) % MAX_PARTICLES;
@@ -91,7 +92,7 @@ export class Effects {
 
   ripple(at, color, camera, size = 0.15) {
     const m = new Mesh(new RingGeometry(0.9, 1, 64), new MeshBasicMaterial({
-      color: new Color(color).multiplyScalar(3), transparent: true, side: DoubleSide,
+      color: new Color(color), transparent: true, side: DoubleSide,
       blending: AdditiveBlending, depthWrite: false,
     }));
     m.position.copy(at);
@@ -171,8 +172,8 @@ export class Effects {
       cur.quaternion.copy(camera.quaternion);
       const r = h.pinching ? 0.007 : 0.005;
       cur.scale.setScalar(r);
-      orb.material.color.copy(c).multiplyScalar(h.pinching ? 3 : 1.4);
-      ring.material.color.copy(c).multiplyScalar(h.pinching ? 2.5 : 1);
+      orb.material.color.copy(c).lerp(WHITE, h.pinching ? 0.6 : 0.2);
+      ring.material.color.copy(c);
       ring.material.opacity = h.pinching ? 1 : 0.5;
       ring.rotation.z = t * 2;
       ring.scale.setScalar(h.pinching ? 0.75 + Math.sin(t * 10) * 0.08 : 1.2);

@@ -129,8 +129,11 @@ input[type='checkbox'] { accent-color: var(--accent); width: 17px; height: 17px;
 }
 .sender-panel h2 { margin: 0; font: 600 18px var(--display); letter-spacing: 0.05em; }
 .sender-panel label { display: grid; gap: 4px; color: var(--muted); }
+.sender-panel > *, .sender-panel label > * { min-width: 0; }
+.sender-panel .row { flex-wrap: wrap; }
+.sender-panel .row > button { flex: 1 1 30%; }
 #sender-code {
-  font: 600 30px var(--display); letter-spacing: 0.3em; text-transform: uppercase; text-align: center;
+  width: 100%; font: 600 30px var(--display); letter-spacing: 0.3em; text-transform: uppercase; text-align: center;
   background: rgba(0, 0, 0, 0.35); border: 1px solid var(--line); border-radius: 12px; padding: 10px;
   color: var(--accent); text-shadow: 0 0 14px var(--accent); outline: none;
 }

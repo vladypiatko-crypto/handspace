@@ -215,8 +215,9 @@ label.check input { margin-top: 2px; flex: none; }
 #size { width: 90px; }
 @media (max-width: 760px) {
   #toolbar button span { display: none; }
-  #toolbar { gap: 6px; }
-  #toolbar .group + .group { padding-left: 6px; }
+  #toolbar { gap: 6px 8px; flex-wrap: wrap; justify-content: center; width: calc(100vw - 16px); }
+  #toolbar .group + .group { padding-left: 0; border-left: none; }
+  #toolbar button { min-width: 38px; height: 38px; }
 }
 
 /* ------------------------------------------------------------ panels */

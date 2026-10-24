@@ -42,21 +42,25 @@ export class MotionSource {
     return typeof window !== 'undefined' && 'DeviceOrientationEvent' in window;
   }
 
-  // Must be called from a user gesture on iOS.
+  // Must be called from a user gesture on iOS. Resolves false only when the
+  // sensors are clearly unavailable; callers should still check `hasData`.
   async start() {
     if (this.active) return true;
     if (!MotionSource.supported) return false;
     const DOE = window.DeviceOrientationEvent;
+    let denied = false;
     if (typeof DOE.requestPermission === 'function') {
       try {
-        if ((await DOE.requestPermission()) !== 'granted') return false;
+        denied = (await DOE.requestPermission()) !== 'granted';
       } catch {
-        return false;
+        denied = true;
       }
     }
+    // iOS really blocks events after a "no"; some Android WebViews report
+    // "denied" but deliver events anyway, so listen regardless.
     window.addEventListener('deviceorientation', this._onEvent);
     this.active = true;
-    return true;
+    return !denied || !/iPhone|iPad|iPod/.test(navigator.userAgent);
   }
 
   stop() {

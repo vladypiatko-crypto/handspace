@@ -82,7 +82,7 @@ export class Store {
   exportJson() {
     const blob = new Blob([JSON.stringify({ app: 'handspace', version: 1, objects: JSON.parse(this.current) }, null, 1)],
       { type: 'application/json' });
-    download(blob, `handspace-${stamp()}.json`);
+    return download(blob, `handspace-${stamp()}.json`);
   }
 
   async importJson(file) {
@@ -97,7 +97,7 @@ export class Store {
     const { GLTFExporter } = await import('three/examples/jsm/exporters/GLTFExporter.js');
     const group = exportableGroup(this.content);
     const glb = await new GLTFExporter().parseAsync(group, { binary: true });
-    download(new Blob([glb], { type: 'model/gltf-binary' }), `handspace-${stamp()}.glb`);
+    return download(new Blob([glb], { type: 'model/gltf-binary' }), `handspace-${stamp()}.glb`);
   }
 }
 
@@ -105,7 +105,16 @@ function stamp() {
   return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
 }
 
-function download(blob, name) {
+async function download(blob, name) {
+  // Inside the Android app, downloads go through the native side.
+  if (window.HandSpaceNative) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    const path = window.HandSpaceNative.saveFile(name, blob.type, btoa(bin));
+    if (!path) throw new Error('could not save the file');
+    return `Saved to ${path}`;
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;

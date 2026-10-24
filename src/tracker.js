@@ -2,8 +2,12 @@ import { FilesetResolver, HandLandmarker, FaceLandmarker, PoseLandmarker } from 
 
 // Google's pre-trained MediaPipe models (the same ones used by Meet effects and
 // many web games). The wasm runtime is served from our own public/ folder.
+// The Android app bundles the hand model so tracking works offline.
+const IN_APP = navigator.userAgent.includes('HandSpaceApp');
 const MODELS = {
-  hand: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+  hand: IN_APP
+    ? new URL('models/hand_landmarker.task', document.baseURI).href
+    : 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
   face: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
   pose: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
 };

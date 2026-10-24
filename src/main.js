@@ -336,7 +336,7 @@ function buildToolbar() {
     facing = facing === 'user' ? 'environment' : 'user';
     useLocalCamera();
   };
-  $('#export-json').onclick = () => { store.exportJson(); toast('Saved'); };
+  $('#export-json').onclick = () => store.exportJson().then((msg) => toast(msg || 'Saved'), (err) => toast(`Save failed: ${err.message}`));
   $('#import-json').onclick = () => $('#file-input').click();
   $('#file-input').onchange = async (e) => {
     const file = e.target.files[0];
@@ -344,7 +344,7 @@ function buildToolbar() {
     if (!file) return;
     try { await store.importJson(file); toast('Opened'); } catch (err) { toast(`Couldn't open: ${err.message}`); }
   };
-  $('#export-glb').onclick = () => store.exportGlb().then(() => toast('Exported .glb'), (err) => toast(`Export failed: ${err.message}`));
+  $('#export-glb').onclick = () => store.exportGlb().then((msg) => toast(msg || 'Exported .glb'), (err) => toast(`Export failed: ${err.message}`));
   $('#clear').onclick = () => {
     if (store.count && confirm('Delete everything? (You can still undo.)')) { tools.cancel(); store.clear(); toast('Cleared'); }
   };

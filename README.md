@@ -46,6 +46,14 @@ Mouse/touch (menu → "Mouse/touch acts as a hand"): drag to draw, drag an objec
 
 Keyboard: `C` create · `P` paint · `E` erase · `1`–`6` shapes · `Z`/`Y` undo/redo · `F` free view · `R` recenter · `M` menu.
 
+## Android app (APK)
+
+`npm run apk` builds `android/build/HandSpace.apk`: the same app in a fullscreen Android wrapper, with the hand model bundled so tracking works offline. To install it, copy the APK to your phone, open it, and allow installing from that source when Android asks. It needs Android 7 or newer.
+
+The build doesn't use Gradle or the Android SDK. `android/build-apk.mjs` compiles `android/src` against the Android framework jar from Maven Central, converts it with `dx`, encodes the manifest and icon, then zips and signs the APK (APK Signature Scheme v2). It only needs Node and a JDK.
+
+`android/signing/` holds a **debug** signing key, committed so every build can update the installed app in place. Don't use it for a store release.
+
 ## Develop
 
 ```bash
@@ -71,6 +79,7 @@ Pushing to `main` deploys to GitHub Pages through `.github/workflows/deploy.yml`
 | `src/fx.js` | Sparks, shockwaves, fingertip orbs |
 | `src/link.js` | Phone → PC WebRTC link (PeerJS) |
 | `src/motion.js` | Gyroscope → camera rotation |
+| `android/` | Android wrapper (`MainActivity.java`) and the APK build script |
 
 The virtual camera uses the same field of view as the real one, so 3D points line up with your fingers on screen. If strokes drift away from your fingertips, adjust **Camera field of view** in the menu.
 

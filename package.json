@@ -9,7 +9,8 @@
     "dev": "npm run copy-wasm && vite --host",
     "build": "npm run copy-wasm && vite build",
     "preview": "vite preview --host",
-    "test": "node scripts/test-hands.mjs"
+    "test": "node scripts/test-hands.mjs",
+    "apk": "node android/build-apk.mjs"
   },
   "license": "MIT",
   "dependencies": {

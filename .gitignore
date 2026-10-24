@@ -2,3 +2,5 @@ node_modules/
 dist/
 public/mediapipe/
 .DS_Store
+android/.cache/
+android/build/

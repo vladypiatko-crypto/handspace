@@ -122,8 +122,9 @@ export class Effects {
     });
   }
 
-  // hands: Hand[]; color: current tool color; camera: the AR camera.
-  update(dt, t, hands, color, camera) {
+  // hands: Hand[]; color: current color; brush: stroke radius (m); camera: the AR camera.
+  update(dt, t, hands, color, brush, camera) {
+    this.brush = brush;
     // Particles
     const drag = Math.exp(-2.5 * dt);
     for (let i = 0; i < MAX_PARTICLES; i++) {
@@ -168,15 +169,15 @@ export class Effects {
       cur.visible = h.present;
       if (!h.present) return;
       const { orb, ring } = cur.userData;
-      cur.position.copy(h.world);
+      const active = h.pinching || h.drawing;
+      cur.position.copy(h.cursorWorld);
       cur.quaternion.copy(camera.quaternion);
-      const r = h.pinching ? 0.007 : 0.005;
-      cur.scale.setScalar(r);
-      orb.material.color.copy(c).lerp(WHITE, h.pinching ? 0.6 : 0.2);
+      cur.scale.setScalar(h.drawing ? Math.max(0.004, this.brush * 1.1) : active ? 0.007 : 0.005);
+      orb.material.color.copy(c).lerp(WHITE, active ? 0.6 : 0.2);
       ring.material.color.copy(c);
-      ring.material.opacity = h.pinching ? 1 : 0.5;
+      ring.material.opacity = active ? 1 : 0.5;
       ring.rotation.z = t * 2;
-      ring.scale.setScalar(h.pinching ? 0.75 + Math.sin(t * 10) * 0.08 : 1.2);
+      ring.scale.setScalar(active ? 0.75 + Math.sin(t * 10) * 0.08 : 1.2);
     });
   }
 }

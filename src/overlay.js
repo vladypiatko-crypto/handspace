@@ -3,7 +3,7 @@ import { HAND_CONNECTIONS, FACE_CONTOURS, POSE_CONNECTIONS } from './tracker.js'
 // Draws the tracking results on a 2D canvas over the 3D view in a neon style.
 
 const HAND_COLORS = ['#4fd1c5', '#f472b6'];
-const HOLD_ICONS = { fist: '↶ undo', peace: '✌ next tool' };
+const HOLD_ICONS = { fist: '↶ undo', peace: '✌ next shape' };
 
 export class Overlay {
   constructor(canvas) {
@@ -89,6 +89,22 @@ export class Overlay {
           g.fill();
         }
         g.restore();
+      }
+
+      // Pointing: a bright dot at the fingertip ("pen tip").
+      if (hand.drawing || hand.gesture === 'point') {
+        const tx = hand.tipScreen.x * w;
+        const ty = hand.tipScreen.y * h;
+        g.save();
+        g.fillStyle = color;
+        g.shadowColor = color;
+        g.shadowBlur = hand.drawing ? 24 : 10;
+        g.globalAlpha = hand.drawing ? 1 : 0.6;
+        g.beginPath();
+        g.arc(tx, ty, hand.drawing ? 7 : 5, 0, Math.PI * 2);
+        g.fill();
+        g.restore();
+        return;
       }
 
       // Pinch ring: closes in as you pinch, spins while pinched.

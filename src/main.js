@@ -1,4 +1,4 @@
-import { Quaternion } from 'three';
+import { Quaternion, Vector3 } from 'three';
 import QRCode from 'qrcode';
 import { openCamera, stopStream, videoReady } from './camera.js';
 import { Receiver, Sender, normalizeCode } from './link.js';
@@ -17,20 +17,22 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 
 const COLORS = ['#4fd1c5', '#f472b6', '#facc15', '#a78bfa', '#60a5fa', '#fb923c', '#4ade80', '#ffffff'];
 const HOLD_TIME = 0.8; // seconds to hold a fist / peace sign
-const TOOL_NAMES = { draw: 'Draw', shape: 'Shape', grab: 'Grab', paint: 'Paint', erase: 'Erase' };
+const TOOL_NAMES = { create: 'Create', paint: 'Paint', erase: 'Erase' };
+const SHAPE_NAMES = { bar: 'Bar', box: 'Box', sphere: 'Sphere', cylinder: 'Cylinder', cone: 'Cone', torus: 'Ring' };
 // Settings that are remembered between visits.
 const PERSIST = ['tool', 'shape', 'color', 'size', 'showSkeleton', 'face', 'pose', 'fov', 'glow'];
 
 // ------------------------------------------------------------------ settings
 
 const settings = {
-  tool: 'draw', shape: 'bar', color: COLORS[0], size: 8,
+  tool: 'create', shape: 'bar', color: COLORS[0], size: 8,
   showSkeleton: true, face: false, pose: false, glow: true, fov: 62,
   mirror: true, motion: false, freeView: false, pointerHand: false,
 };
 try {
   const saved = JSON.parse(localStorage.getItem('handspace.settings') || '{}');
   for (const k of PERSIST) if (k in saved) settings[k] = saved[k];
+  if (!TOOLS.includes(settings.tool)) settings.tool = 'create'; // older versions had more tools
 } catch { /* ignore */ }
 
 function saveSettings() {
@@ -280,7 +282,7 @@ function setTool(tool) {
   tools.cancel();
   settings.tool = tool;
   for (const b of $$('[data-tool]')) b.classList.toggle('active', b.dataset.tool === tool);
-  $('#shapes').classList.toggle('hidden', tool !== 'shape');
+  $('#shapes').classList.toggle('hidden', tool !== 'create');
   saveSettings();
 }
 
@@ -350,7 +352,7 @@ function buildToolbar() {
   $('#pair-cancel').onclick = () => { facing = 'user'; useLocalCamera(); };
 
   setTool(settings.tool);
-  $('#shapes').classList.toggle('hidden', settings.tool !== 'shape');
+  $('#shapes').classList.toggle('hidden', settings.tool !== 'create');
   setShape(settings.shape);
   setColor(settings.color);
   world.setMirror(settings.mirror);
@@ -371,14 +373,14 @@ addEventListener('keydown', (e) => {
   if ($('#app').classList.contains('hidden')) return;
   const k = e.key.toLowerCase();
   if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); return e.shiftKey ? redo() : undo(); }
-  const toolKeys = { d: 'draw', s: 'shape', g: 'grab', p: 'paint', e: 'erase' };
+  const toolKeys = { c: 'create', d: 'create', g: 'create', s: 'create', p: 'paint', e: 'erase' };
   if (toolKeys[k]) setTool(toolKeys[k]);
   else if (k === 'z') undo();
   else if (k === 'y') redo();
   else if (k === 'f') setSetting('freeView', !settings.freeView);
   else if (k === 'r') recenter();
   else if (k === 'm' || k === 'escape') $('#menu').classList.toggle('hidden', k === 'escape' || !$('#menu').classList.contains('hidden'));
-  else if (k >= '1' && k <= String(SHAPES.length)) { setTool('shape'); setShape(SHAPES[+k - 1]); }
+  else if (k >= '1' && k <= String(SHAPES.length)) { setTool('create'); setShape(SHAPES[+k - 1]); }
 });
 
 // ------------------------------------------------------------------ mouse / touch as a hand
@@ -397,8 +399,12 @@ canvas3d.addEventListener('pointerdown', (e) => {
   pointer.down = true;
   pointer.u0 = pointer.u;
   pointer.v0 = pointer.v;
+  pointer.mode = null;
+  pointer.shape = e.shiftKey || e.button === 2;
+  pointer.forceDraw = e.altKey;
   canvas3d.setPointerCapture(e.pointerId);
 });
+canvas3d.addEventListener('contextmenu', (e) => { if (settings.pointerHand) e.preventDefault(); });
 canvas3d.addEventListener('pointermove', (e) => { pointerPos(e); pointer.inside = true; });
 canvas3d.addEventListener('pointerup', () => { pointer.down = false; });
 canvas3d.addEventListener('pointercancel', () => { pointer.down = false; });
@@ -410,14 +416,28 @@ canvas3d.addEventListener('wheel', (e) => {
   toast(`Depth ${(pointer.depth * 100).toFixed(0)} cm`);
 }, { passive: false });
 
-function virtualHands() {
+// Mouse/touch stands in for hands. In Create mode: drag on empty space draws
+// (like pointing), drag an object to move it (like pinching), and Shift-drag or
+// right-drag stretches a shape (like pinching with both hands). Alt-drag always
+// draws, so you can draw on objects too.
+const _pt = new Vector3();
+function pointerMode(view) {
+  if (settings.tool !== 'create') return 'pinch';
+  if (pointer.shape) return 'shape';
+  if (pointer.forceDraw) return 'point';
+  handInput.unproject(pointer.u0, pointer.v0, pointer.depth, view, _pt).applyMatrix4(world.camera.matrixWorld);
+  return tools.pick(_pt, false) ? 'pinch' : 'point';
+}
+
+function virtualHands(view) {
   if (!pointer.inside) return [];
   const { u, v, depth, down } = pointer;
-  if (settings.tool === 'shape' && down) {
-    // One click-drag = both hands: the press point and the current point.
+  if (!down) return [{ u, v, depth }];
+  pointer.mode ??= pointerMode(view);
+  if (pointer.mode === 'shape') {
     return [{ u: pointer.u0, v: pointer.v0, depth, pinching: true }, { u, v, depth, pinching: true }];
   }
-  return [{ u, v, depth, pinching: down }];
+  return [{ u, v, depth, pinching: pointer.mode === 'pinch', pointing: pointer.mode === 'point' }];
 }
 
 // ------------------------------------------------------------------ hold gestures
@@ -428,9 +448,9 @@ function holdGestures() {
     if (h.firedFor || h.gestureTime < HOLD_TIME) continue;
     if (h.gesture === 'fist') { undo(); h.firedFor = 'fist'; }
     if (h.gesture === 'peace') {
-      const next = TOOLS[(TOOLS.indexOf(settings.tool) + 1) % TOOLS.length];
-      setTool(next);
-      toast(`Tool: ${TOOL_NAMES[next]}`);
+      const next = SHAPES[(SHAPES.indexOf(settings.shape) + 1) % SHAPES.length];
+      setShape(next);
+      toast(`Shape: ${SHAPE_NAMES[next]}`);
       h.firedFor = 'peace';
     }
   }
@@ -468,7 +488,7 @@ function loop(now) {
     }
   }
   if (settings.pointerHand && !settings.freeView) {
-    handInput.updateVirtual(virtualHands(), view, world.camera, t);
+    handInput.updateVirtual(virtualHands(view), view, world.camera, t);
     updated = true;
   }
   if (updated) {
@@ -476,7 +496,7 @@ function loop(now) {
     tools.update(handInput.hands);
   }
 
-  fx.update(dt, t, handInput.hands, settings.color, world.camera);
+  fx.update(dt, t, handInput.hands, settings.color, tools.radius, world.camera);
   overlay.draw({
     hands: settings.freeView ? [] : handInput.hands,
     face: settings.face ? lastResult?.face : null,
@@ -499,10 +519,14 @@ function updateHud() {
   const hands = handInput.active;
   let status;
   if (!trackerReady && !settings.pointerHand) status = 'Loading hand tracking…';
-  else if (settings.pointerHand) status = `${TOOL_NAMES[settings.tool]} · mouse/touch hand (scroll = depth)`;
-  else if (!hands.length) status = `${TOOL_NAMES[settings.tool]} · show your hands to the camera`;
-  else status = `${TOOL_NAMES[settings.tool]} · ${hands.length} hand${hands.length > 1 ? 's' : ''}`;
-  if (tools.hint) status += ` — ${tools.hint}`;
+  else if (settings.pointerHand) {
+    status = settings.tool === 'create'
+      ? 'Drag to draw · drag an object to move it · Shift-drag for a shape · Alt-drag to draw on objects · scroll = depth'
+      : `${TOOL_NAMES[settings.tool]} · click or drag over objects`;
+  } else if (!hands.length) status = 'Show your hands to the camera';
+  else if (settings.tool === 'create') status = '☝️ point to draw · 🤏 pinch an object to move it · 🤏🤏 pinch both hands and pull apart for a shape';
+  else status = `${TOOL_NAMES[settings.tool]} · pinch or point at objects`;
+  if (tools.hint && (trackerReady || settings.pointerHand)) status = tools.hint[0].toUpperCase() + tools.hint.slice(1);
   const detail = [];
   for (const h of hands) {
     if (h.lm) detail.push(`${h.id ? 'Hand 2' : 'Hand 1'}: ${h.gesture} · ${(h.depth * 100).toFixed(0)} cm`);

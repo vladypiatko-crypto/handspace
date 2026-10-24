@@ -8,7 +8,7 @@ const camera = new PerspectiveCamera();
 camera.updateMatrixWorld();
 
 // Rough flat hand, meters, wrist at origin, fingers pointing up (-y in image).
-function makeHand({ pinch = false, fist = false, peace = false } = {}) {
+function makeHand({ pinch = false, fist = false, peace = false, point = false } = {}) {
   const p = [];
   p[0] = [0, 0, 0];
   const fingers = { 1: -0.035, 5: -0.02, 9: 0, 13: 0.018, 17: 0.035 };
@@ -20,6 +20,7 @@ function makeHand({ pinch = false, fist = false, peace = false } = {}) {
   const curl = (b) => { p[b + 2] = [p[b][0], 0.07, 0.02]; p[b + 3] = [p[b][0], 0.05, 0.01]; };
   if (fist) [5, 9, 13, 17].forEach(curl);
   if (peace) [13, 17].forEach(curl);
+  if (point) [9, 13, 17].forEach(curl);
   if (pinch) { p[8] = [-0.03, 0.12, 0.01]; p[4] = [-0.035, 0.115, 0.012]; }
   return p.map(([x, y, z]) => ({ x, y, z }));
 }
@@ -68,6 +69,31 @@ for (const d of [0.3, 0.5, 0.9]) {
   check('fist detected and held', input.hands[0].gesture === 'fist' && input.hands[0].gestureTime > 0.8, input.hands[0].gesture);
   for (let i = 0; i < 5; i++) input.update([frame(makeHand({ peace: true }), 0.5)], view, camera, (t += 0.033));
   check('peace detected', input.hands[0].gesture === 'peace', input.hands[0].gesture);
+}
+
+{
+  // Pointing draws, with debounce so tracking flicker doesn't start/stop strokes.
+  const input = new HandInput();
+  let t = 0;
+  const step = (opts) => input.update([frame(makeHand(opts), 0.5)], view, camera, (t += 0.033));
+  step({});
+  step({ point: true });
+  check('point gesture recognized', input.hands[0].gesture === 'point', input.hands[0].gesture);
+  check('one frame of pointing does not draw yet', !input.hands[0].drawing);
+  step({ point: true });
+  check('drawing starts after debounce', input.hands[0].drawing && input.hands[0].drawStarted);
+  step({ point: true });
+  check('drawStarted fires once', !input.hands[0].drawStarted);
+  const h = input.hands[0];
+  const tipX = (h.tipCam.x * f) / -h.tipCam.z / W + 0.5;
+  check('pen tip is at the index fingertip', Math.abs(tipX - h.lm[8].x) < 0.01 && h.cursorWorld === h.tipWorld);
+  step({});
+  check('one frame of flicker keeps drawing', h.drawing);
+  step({ point: true });
+  step({}); step({}); step({});
+  check('drawing ends after pointing stops', !h.drawing && h.drawEnded);
+  step({ pinch: true });
+  check('pinch does not draw', !h.drawing && h.pinching);
 }
 
 {

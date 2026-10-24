@@ -1,18 +1,18 @@
 # ✋ HandSpace
 
-Draw and build in 3D with your hands. Point a camera at yourself: HandSpace tracks your hands (plus your face and body if you want), and you pinch and pull in the air to make glowing strokes and holographic shapes that stay where you put them.
+Draw and build in 3D with your hands. Point a camera at yourself and HandSpace tracks your hands (plus your face and body if you want). Point to draw glowing lines in the air, pinch things to move them anywhere, and pinch with both hands and pull apart to create holographic shapes. Everything stays where you put it.
 
 It runs entirely in the browser on PCs, phones and tablets, with nothing to install.
 
 ## Features
 
 - **Hand, face and body tracking** with Google's MediaPipe models (two hands, face expressions, body skeleton).
-- **Draw in 3D.** Pinch (thumb and index finger) and move. Move your hand closer to or further from the camera to draw in depth.
-- **Draw on objects.** Start a stroke on a shape and it sticks to the surface and moves with the shape.
-- **Stretch shapes between your hands.** Pinch with both hands and pull apart to get a hatched bar, box, sphere, cylinder, cone or ring.
-- **Grab, scale and rotate.** Grab with one hand to move, and with both hands to scale and rotate.
-- **Paint and erase** objects by pinching them. To erase, pinch and sweep across things.
-- **Hands-free controls.** Hold a fist to undo, and hold a ✌️ to switch tools.
+- **☝️ Point to draw in 3D.** Move your hand closer to or further from the camera to draw in depth.
+- **Draw on objects.** Point at a shape and touch it; the drawing sticks to the surface and moves with the shape.
+- **🤏 Pinch to move.** Pinch any object to grab it and place it anywhere. Pinch it with both hands to scale and rotate it.
+- **🤏🤏 Pinch both hands and pull apart** in empty space to stretch a hatched bar, box, sphere, cylinder, cone or ring.
+- **Paint and Erase modes** recolor or remove whatever you pinch or point at. To erase, sweep across things.
+- **Hands-free controls.** Hold a fist to undo, and hold a ✌️ to switch to the next shape.
 - **Objects stay in place.** On a phone or tablet, turn on *Lock objects to the room*. The gyroscope keeps your creations fixed in the room while you turn the camera away and back.
 - **Phone as camera, PC as screen.** The phone streams its camera live to the PC over a direct WebRTC link. The PC does the tracking and shows everything.
 - **Autosave** in the browser, with undo/redo, save/open `.json` files, and export to `.glb` for Blender, Unity and other 3D apps.
@@ -35,13 +35,16 @@ Both devices must be able to open the app over **HTTPS**, for example from the G
 
 | Gesture | Does |
 |---|---|
-| Pinch (thumb + index) | Draw, grab, paint or erase, depending on the tool |
-| Pinch with both hands and pull apart | Stretch a new shape (Shape tool) |
-| Grab with both hands | Scale and rotate an object |
+| ☝️ Point with your index finger | Draw (touch an object to draw on it) |
+| 🤏 Pinch an object | Grab it and move it |
+| Pinch an object with both hands | Scale and rotate it |
+| 🤏🤏 Pinch both hands in empty space and pull apart | Stretch a new shape |
 | Hold a fist ✊ | Undo |
-| Hold a peace sign ✌️ | Next tool |
+| Hold a peace sign ✌️ | Next shape |
 
-Keyboard: `D` draw · `S` shape · `G` grab · `P` paint · `E` erase · `1`–`6` shapes · `Z`/`Y` undo/redo · `F` free view · `R` recenter · `M` menu.
+Mouse/touch (menu → "Mouse/touch acts as a hand"): drag to draw, drag an object to move it, Shift-drag or right-drag for a shape, Alt-drag to draw on an object, scroll for depth.
+
+Keyboard: `C` create · `P` paint · `E` erase · `1`–`6` shapes · `Z`/`Y` undo/redo · `F` free view · `R` recenter · `M` menu.
 
 ## Develop
 
@@ -61,10 +64,10 @@ Pushing to `main` deploys to GitHub Pages through `.github/workflows/deploy.yml`
 | File | Role |
 |---|---|
 | `src/tracker.js` | MediaPipe hand / face / pose landmarkers |
-| `src/hands.js` | Pinch detection, distance from camera (from palm size), smoothing (One Euro filter), gestures |
+| `src/hands.js` | Pinch / point detection, distance from camera (from palm size), smoothing (One Euro filter), gestures |
 | `src/world.js` | three.js scene; the camera feed is the background and bloom makes the neon glow |
 | `src/objects.js` | Holographic shapes, glowing strokes, save format |
-| `src/tools.js` | Draw / shape / grab / paint / erase |
+| `src/tools.js` | Create (point = draw, pinch = move, two-hand pinch = shape), paint, erase |
 | `src/fx.js` | Sparks, shockwaves, fingertip orbs |
 | `src/link.js` | Phone → PC WebRTC link (PeerJS) |
 | `src/motion.js` | Gyroscope → camera rotation |

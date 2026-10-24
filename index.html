@@ -85,11 +85,9 @@
 
     <nav id="toolbar">
       <div class="group" id="tools">
-        <button data-tool="draw" class="active" title="Draw (D)">✏️<span>Draw</span></button>
-        <button data-tool="shape" title="Shape (S)">🧊<span>Shape</span></button>
-        <button data-tool="grab" title="Grab / move / scale (G)">✊<span>Grab</span></button>
-        <button data-tool="paint" title="Paint an object (P)">🎨<span>Paint</span></button>
-        <button data-tool="erase" title="Erase (E)">🧽<span>Erase</span></button>
+        <button data-tool="create" class="active" title="Create (C): point to draw, pinch to move, pinch both hands for shapes">✋<span>Create</span></button>
+        <button data-tool="paint" title="Paint (P): pinch or point at an object to recolor it">🎨<span>Paint</span></button>
+        <button data-tool="erase" title="Erase (E): pinch or point and sweep over things">🧽<span>Erase</span></button>
       </div>
       <div class="group" id="shapes">
         <button data-shape="bar" class="active" title="Hatched bar">▭</button>
@@ -101,7 +99,7 @@
       </div>
       <div class="group" id="colors"></div>
       <div class="group">
-        <input type="range" id="size" min="2" max="30" value="8" title="Brush / bar thickness" />
+        <input type="range" id="size" min="2" max="30" value="8" title="Line / shape thickness" />
       </div>
       <div class="group">
         <button id="undo" title="Undo (Z) — or hold a fist">↶</button>
@@ -135,13 +133,15 @@
       <details>
         <summary>Gestures</summary>
         <ul class="gestures">
-          <li><b>Pinch</b> (thumb + index) — draw, grab, paint or erase depending on the tool.</li>
-          <li><b>Draw on objects</b> — start a stroke on a shape and it sticks to its surface and moves with it.</li>
-          <li><b>Pinch with both hands and pull apart</b> — in Shape mode, stretches a new shape between your hands.</li>
-          <li><b>Grab with both hands</b> — scale and rotate an object.</li>
-          <li><b>Hold a fist</b> for a moment — undo.</li>
-          <li><b>Hold a peace sign ✌️</b> for a moment — switch to the next tool.</li>
-          <li>Move your hand closer to or further from the camera to draw in depth.</li>
+          <li><b>☝️ Point</b> with your index finger to draw in the air.</li>
+          <li><b>Point at an object and touch it</b> to draw on it. The drawing sticks to the object and moves with it.</li>
+          <li><b>🤏 Pinch an object</b> (thumb + index) to grab it and move it anywhere.</li>
+          <li><b>Pinch an object with both hands</b> to scale and rotate it.</li>
+          <li><b>🤏🤏 Pinch both hands in empty space and pull apart</b> to stretch a new shape.</li>
+          <li><b>Hold a fist ✊</b> for a moment to undo.</li>
+          <li><b>Hold a peace sign ✌️</b> for a moment to switch to the next shape.</li>
+          <li>Move your hand closer to or further from the camera to work in depth.</li>
+          <li><b>Mouse/touch:</b> drag to draw, drag an object to move it, Shift-drag or right-drag for a shape, Alt-drag to draw on an object, scroll for depth.</li>
         </ul>
       </details>
       <button id="menu-close" class="primary">Done</button>

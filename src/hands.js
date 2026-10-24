@@ -36,6 +36,8 @@ const FINGERS = [[8, 6], [12, 10], [16, 14], [20, 18]]; // [tip, middle joint]
 const PINCH_ON = 0.32; // thumb–index gap as a fraction of palm length
 const PINCH_OFF = 0.5;
 const GRACE_FRAMES = 4; // keep a hand alive briefly when tracking drops a frame
+const POINT_ON_FRAMES = 2; // frames of pointing before drawing starts
+const POINT_OFF_FRAMES = 3; // frames of not pointing before drawing stops
 
 export class Hand {
   constructor(id) {
@@ -47,6 +49,14 @@ export class Hand {
     this.cam = new Vector3(); // pinch point in camera space (meters)
     this.world = new Vector3(); // pinch point in world space
     this.screen = { x: 0.5, y: 0.5 }; // pinch point on screen (0..1)
+    this.tipCam = new Vector3(); // index fingertip, for pointing / drawing
+    this.tipWorld = new Vector3();
+    this.tipScreen = { x: 0.5, y: 0.5 };
+    this.drawing = false; // pointing with the index finger (debounced)
+    this.drawStarted = false;
+    this.drawEnded = false;
+    this.pointOn = 0;
+    this.pointOff = 0;
     this.lm = null; // landmarks in screen space (0..1)
     this.depth = 0.5;
     this.label = '';
@@ -54,8 +64,13 @@ export class Hand {
     this.gestureTime = 0;
     this.missing = 0;
     this.filter = new OneEuro3(1.2, 4, 1);
+    this.tipFilter = new OneEuro3(1.2, 4, 1);
     this.depthFilter = new OneEuro(0.6, 0.5, 1);
   }
+
+  // Where this hand is acting: the fingertip while pointing, else the pinch point.
+  get cursorWorld() { return this.drawing || this.gesture === 'point' ? this.tipWorld : this.world; }
+  get cursorScreen() { return this.drawing || this.gesture === 'point' ? this.tipScreen : this.screen; }
 }
 
 export class HandInput {
@@ -72,7 +87,7 @@ export class HandInput {
   update(raw, view, camera, t) {
     const dt = this.lastT ? Math.min(t - this.lastT, 0.2) : 0;
     this.lastT = t;
-    for (const h of this.hands) { h.started = false; h.ended = false; }
+    this._resetEvents();
 
     const toScreen = (lm) => lm.map((p) => ({ x: view.mirror ? 1 - p.x : p.x, y: p.y, z: p.z }));
     const items = raw.map((r) => ({ ...r, slm: toScreen(r.lm) }));
@@ -82,7 +97,7 @@ export class HandInput {
       const r = assigned[i];
       if (!r) return this._lose(h);
       h.missing = 0;
-      if (!h.present) { h.filter.reset(); h.depthFilter.reset(); }
+      if (!h.present) { h.filter.reset(); h.tipFilter.reset(); h.depthFilter.reset(); }
       h.present = true;
       h.lm = r.slm;
       h.label = r.label;
@@ -107,6 +122,7 @@ export class HandInput {
       const u = (slm[4].x + slm[8].x) / 2;
       const v = (slm[4].y + slm[8].y) / 2;
       this._place(h, u, v, view, camera, t);
+      this._placeTip(h, slm[8].x, slm[8].y, view, camera, t);
 
       const ext = FINGERS.map(([tip, pip]) => dist3(wl[0], wl[tip]) > dist3(wl[0], wl[pip]) * 1.12);
       const curled = FINGERS.map(([tip, pip]) => dist3(wl[0], wl[tip]) < dist3(wl[0], wl[pip]));
@@ -117,17 +133,17 @@ export class HandInput {
       else if (ext.every(Boolean)) g = 'open';
       else if (ext[0] && !ext[1] && !ext[2] && !ext[3]) g = 'point';
       this._setGesture(h, g, dt);
+      this._setDrawing(h, g === 'point');
     });
   }
 
   // Drives hands from the mouse / touch instead of the camera.
-  // virtual: [{ u, v, depth, pinching }] in screen space.
+  // virtual: [{ u, v, depth, pinching, pointing }] in screen space.
   updateVirtual(virtual, view, camera, t) {
     const dt = this.lastT ? Math.min(t - this.lastT, 0.2) : 0;
     this.lastT = t;
+    this._resetEvents();
     this.hands.forEach((h, i) => {
-      h.started = false;
-      h.ended = false;
       const vh = virtual[i];
       if (!vh) return this._lose(h, true);
       h.present = true;
@@ -136,18 +152,53 @@ export class HandInput {
       h.label = 'Pointer';
       h.depth = vh.depth;
       h.filter.reset();
+      h.tipFilter.reset();
       this._setPinch(h, vh.pinching);
       this._place(h, vh.u, vh.v, view, camera, t);
-      this._setGesture(h, vh.pinching ? 'pinch' : 'hand', dt);
+      this._placeTip(h, vh.u, vh.v, view, camera, t);
+      const g = vh.pinching ? 'pinch' : vh.pointing ? 'point' : 'hand';
+      this._setGesture(h, g, dt);
+      this._setDrawing(h, g === 'point', true);
     });
   }
 
-  _place(h, u, v, { W, H, f }, camera, t) {
+  _resetEvents() {
+    for (const h of this.hands) {
+      h.started = h.ended = false;
+      h.drawStarted = h.drawEnded = false;
+    }
+  }
+
+  // Screen point (0..1) at the hand's distance → camera space → world space.
+  unproject(u, v, depth, { W, H, f }, out) {
+    return out.set(((u - 0.5) * W) / f * depth, (-(v - 0.5) * H) / f * depth, -depth);
+  }
+
+  _place(h, u, v, view, camera, t) {
     h.screen.x = u;
     h.screen.y = v;
-    h.cam.set(((u - 0.5) * W) / f * h.depth, (-(v - 0.5) * H) / f * h.depth, -h.depth);
-    h.filter.filter(h.cam, t);
+    h.filter.filter(this.unproject(u, v, h.depth, view, h.cam), t);
     h.world.copy(h.cam).applyMatrix4(camera.matrixWorld);
+  }
+
+  _placeTip(h, u, v, view, camera, t) {
+    h.tipScreen.x = u;
+    h.tipScreen.y = v;
+    h.tipFilter.filter(this.unproject(u, v, h.depth, view, h.tipCam), t);
+    h.tipWorld.copy(h.tipCam).applyMatrix4(camera.matrixWorld);
+  }
+
+  // Pointing must hold for a couple of frames to start a stroke, and stop for a
+  // few to end it, so tracking flicker doesn't scatter dots or break lines.
+  _setDrawing(h, pointing, instant = false) {
+    if (pointing) { h.pointOn++; h.pointOff = 0; } else { h.pointOff++; h.pointOn = 0; }
+    if (!h.drawing && (instant ? pointing : h.pointOn >= POINT_ON_FRAMES)) {
+      h.drawing = true;
+      h.drawStarted = true;
+    } else if (h.drawing && (instant ? !pointing : h.pointOff >= POINT_OFF_FRAMES)) {
+      h.drawing = false;
+      h.drawEnded = true;
+    }
   }
 
   _setPinch(h, on) {
@@ -167,6 +218,8 @@ export class HandInput {
     h.present = false;
     h.lm = null;
     if (h.pinching) { h.pinching = false; h.ended = true; }
+    if (h.drawing) { h.drawing = false; h.drawEnded = true; }
+    h.pointOn = h.pointOff = 0;
     h.gesture = 'none';
     h.gestureTime = 0;
   }

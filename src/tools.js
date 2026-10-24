@@ -1,5 +1,5 @@
 import { Box3, Matrix3, Quaternion, Vector3 } from 'three';
-import { buildObject, disposeObject, ownerOf, serialize, setHighlight, setStrokePoints, shapeFromHands } from './objects.js';
+import { buildObject, disposeObject, finishStroke, ownerOf, serialize, setHighlight, setStrokePoints, shapeFromHands } from './objects.js';
 
 // Modes. "create" needs no switching:
 //   ☝️ point            → draw (touch an object while pointing to draw on it)
@@ -12,8 +12,8 @@ const _nm = new Matrix3();
 const _box = new Box3();
 
 export class Tools {
-  constructor({ world, fx, store, settings }) {
-    Object.assign(this, { world, fx, store, settings });
+  constructor({ world, fx, store, settings, anchors, onStick = () => {} }) {
+    Object.assign(this, { world, fx, store, settings, anchors, onStick });
     this.strokes = [null, null];
     this.preview = null;
     this.grabs = [null, null];
@@ -111,17 +111,21 @@ export class Tools {
       : this.world.pickables(this.world.content, (o) => o.userData.data.type === 'shape');
     const hit = ray.intersectObjects(list, false)[0];
     // The fingertip must be at (or reaching through) the surface, not hovering well in front.
-    if (!hit || (!only && dist < hit.distance - 0.1)) return null;
+    if (!hit) return null;
+    const owner = ownerOf(hit.object);
+    // Drawing areas are forgiving about depth; other shapes need a closer touch.
+    const slack = owner.userData.data.shape === 'board' ? 0.3 : 0.1;
+    if (!only && dist < hit.distance - slack) return null;
     _nm.getNormalMatrix(hit.object.matrixWorld);
     _n.copy(hit.face.normal).applyMatrix3(_nm).normalize();
     if (_n.dot(ray.ray.direction) > 0) _n.negate();
-    return { owner: ownerOf(hit.object), point: hit.point.clone().addScaledVector(_n, this.radius * 0.6) };
+    return { owner, point: hit.point.clone().addScaledVector(_n, this.radius * 0.6) };
   }
 
   _draw(hands) {
     hands.forEach((h, i) => {
       let s = this.strokes[i];
-      if (h.drawStarted && !this.grabs[i]) {
+      if (h.drawStarted && !h.captured && !this.grabs[i]) {
         const surf = this._surfaceHit(h.tipWorld);
         const parent = surf ? surf.owner : this.world.content;
         const scale = surf ? parent.getWorldScale(new Vector3()).x : 1;
@@ -131,6 +135,11 @@ export class Tools {
           pts: parent.worldToLocal(p.clone()).toArray(),
         });
         parent.add(mesh);
+        // Stick mode: a stroke started on a real thing (your face, a cup...) sticks to it.
+        if (!surf && this.settings.stick) {
+          const anchor = this.anchors?.at(h.tipScreen, [`hand${i}`]);
+          if (anchor) { this.anchors.attach(mesh, anchor); this.onStick(anchor.label); }
+        }
         s = this.strokes[i] = { mesh, surface: surf ? parent : null, last: p };
         this.fx.emit(p, this.settings.color, 10, 0.15);
       }
@@ -144,7 +153,7 @@ export class Tools {
           p = surf.point;
         }
         if (p.distanceTo(s.last) > Math.max(this.radius * 0.7, 0.002)) {
-          const local = s.mesh.parent.worldToLocal(p.clone());
+          const local = s.mesh.worldToLocal(p.clone());
           setStrokePoints(s.mesh, [...s.mesh.userData.data.pts, local.x, local.y, local.z]);
           s.last.copy(p);
           this.fx.emit(p, this.settings.color, 2, 0.06, 0.5);
@@ -165,6 +174,7 @@ export class Tools {
       disposeObject(s.mesh);
       return;
     }
+    finishStroke(s.mesh);
     this.fx.emit(s.last, this.settings.color, 14, 0.2);
     this.store.commit();
   }
@@ -173,7 +183,7 @@ export class Tools {
 
   _pinch(hands) {
     hands.forEach((h, i) => {
-      if (h.started) {
+      if (h.started && !h.captured) {
         const other = this.grabs[1 - i];
         if (other) {
           // Second hand joins: scale + rotate the held object with both hands.
@@ -182,7 +192,8 @@ export class Tools {
         } else {
           const target = this.pick(h.world, false);
           if (target) {
-            this.grabs[i] = { target, offset: target.position.clone().sub(h.world) };
+            if (target.userData.data.anchor) this.anchors?.detach(target); // pull it off
+            this.grabs[i] = this._hold(target, h);
             this.fx.emit(h.world, this.settings.color, 8, 0.12);
           } else {
             this.empty[i] = true;
@@ -191,12 +202,16 @@ export class Tools {
       }
       if (h.ended || !h.present) {
         this.empty[i] = false;
+        const released = this.grabs[i]?.target;
         if (this.grabs[i]) {
           this.grabs[i] = null;
           this.two = null;
           const o = this.grabs[1 - i];
-          if (o) o.offset = o.target.position.clone().sub(hands[1 - i].world); // back to one hand
-          else this.store.commit();
+          if (o) this.grabs[1 - i] = this._hold(o.target, hands[1 - i]); // back to one hand
+          else {
+            if (this.settings.stick) this._stick(released);
+            this.store.commit();
+          }
         }
       }
     });
@@ -217,14 +232,47 @@ export class Tools {
     } else {
       hands.forEach((h, i) => {
         const g = this.grabs[i];
-        if (g && h.pinching) {
+        if (!g || !h.pinching) return;
+        if (this.settings.wristRotate && h.lm) {
+          // Twist your wrist to turn what you're holding, around the grab point.
+          const dq = h.rot.clone().multiply(g.rot0.clone().invert());
+          g.target.quaternion.copy(dq).multiply(g.q0);
+          g.target.position.copy(g.offset).applyQuaternion(dq).add(h.world);
+        } else {
           g.target.position.copy(h.world).add(g.offset);
-          this.hint = 'moving';
         }
+        this.hint = 'moving · twist your wrist to rotate';
       });
     }
 
     this._shape(hands);
+  }
+
+  // Starts holding an object with one hand.
+  _hold(target, h) {
+    return { target, offset: target.position.clone().sub(h.world), rot0: h.rot.clone(), q0: target.quaternion.clone() };
+  }
+
+  // Stick mode: dropping something on a real thing sticks it there.
+  _stick(obj) {
+    const anchor = this.anchors?.stick(obj, ['hand0', 'hand1']);
+    if (anchor) this.onStick(anchor.label);
+  }
+
+  // Objects being held, drawn or created right now (physics leaves them alone).
+  busy() {
+    const set = new Set();
+    for (const g of this.grabs) if (g) set.add(g.target);
+    for (const s of this.strokes) if (s) set.add(this._top(s.mesh));
+    if (this.preview) set.add(this.preview);
+    return set;
+  }
+
+  // Lets go of an object that's about to disappear (e.g. eaten).
+  forget(obj) {
+    this.grabs = this.grabs.map((g) => (g && g.target === obj ? null : g));
+    if (this.two?.target === obj) this.two = null;
+    this.highlighted.delete(obj);
   }
 
   _startTwo(hands, target) {
@@ -266,17 +314,22 @@ export class Tools {
         const at = p.getWorldPosition(new Vector3());
         this.fx.ripple(at, this.settings.color, this.world.camera, 0.2);
         this.fx.emit(at, this.settings.color, 50, 0.45, 1.1);
+        if (this.settings.stick) this._stick(p);
         this.store.commit();
       }
     }
-    if (this.empty.some((e, i) => e && hands[i].pinching)) this.hint = 'pinch with your other hand too and pull apart for a shape';
+    if (this.empty.some((e, i) => e && hands[i].pinching)) {
+      this.hint = this.settings.shape === 'board'
+        ? 'pinch with your other hand too and pull apart to mark an area'
+        : 'pinch with your other hand too and pull apart for a shape';
+    }
   }
 
   // ------------------------------------------------------------ paint / erase
 
   _paint(hands) {
     for (const h of hands) {
-      if (!h.started && !h.drawStarted) continue;
+      if ((!h.started && !h.drawStarted) || h.captured) continue;
       const o = this.pick(h.started ? h.world : h.tipWorld, true);
       if (o) this._recolor(o);
     }
@@ -299,7 +352,7 @@ export class Tools {
   _erase(hands) {
     // Pinch or point and sweep: everything you touch disappears.
     for (const h of hands) {
-      if (!h.pinching && !h.drawing) continue;
+      if ((!h.pinching && !h.drawing) || h.captured) continue;
       const o = this.pick(h.pinching ? h.world : h.tipWorld, true);
       if (!o) continue;
       this.highlighted.delete(o);

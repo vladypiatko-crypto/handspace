@@ -1,118 +1,135 @@
-import { FilesetResolver, HandLandmarker, FaceLandmarker, PoseLandmarker } from '@mediapipe/tasks-vision';
+import { HandLandmarker, FaceLandmarker, PoseLandmarker } from '@mediapipe/tasks-vision';
+import { TrackerCore } from './tracker-core.js';
+import TrackerWorker from './tracker-worker.js?worker';
 
 // Google's pre-trained MediaPipe models (the same ones used by Meet effects and
 // many web games). The wasm runtime is served from our own public/ folder.
 // The Android app bundles the hand model so tracking works offline.
-const IN_APP = navigator.userAgent.includes('HandSpaceApp');
-const MODELS = {
-  hand: IN_APP
-    ? new URL('models/hand_landmarker.task', document.baseURI).href
-    : 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
-  face: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-  pose: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
-};
+function modelUrls() {
+  const inApp = navigator.userAgent.includes('HandSpaceApp');
+  const base = 'https://storage.googleapis.com/mediapipe-models';
+  return {
+    hand: inApp
+      ? new URL('models/hand_landmarker.task', document.baseURI).href
+      : `${base}/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+    face: `${base}/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
+    pose: `${base}/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task`,
+    // EfficientDet-Lite0: recognizes 80 everyday things (cup, phone, bottle, book, ...).
+    objects: `${base}/object_detector/efficientdet_lite0/int8/1/efficientdet_lite0.tflite`,
+  };
+}
 
 export const HAND_CONNECTIONS = HandLandmarker.HAND_CONNECTIONS;
 export const FACE_CONTOURS = FaceLandmarker.FACE_LANDMARKS_CONTOURS;
 export const POSE_CONNECTIONS = PoseLandmarker.POSE_CONNECTIONS;
 
-async function create(Task, fileset, options) {
-  // The GPU delegate is much faster but not available everywhere.
-  for (const delegate of ['GPU', 'CPU']) {
-    try {
-      return await Task.createFromOptions(fileset, {
-        ...options,
-        baseOptions: { ...options.baseOptions, delegate },
-      });
-    } catch (err) {
-      if (delegate === 'CPU') throw err;
-      console.warn(`${Task.name}: GPU delegate failed, using CPU`, err);
-    }
-  }
-}
-
+// Runs tracking in a Web Worker so the 3D view never waits for it (falls back
+// to the main thread where workers can't run MediaPipe). detect() never
+// blocks: it sends the newest camera frame when the worker is free and returns
+// a result whenever a new one has arrived.
 export class Tracker {
   constructor() {
-    this.hand = null;
-    this.face = null;
-    this.pose = null;
-    this.frame = 0;
+    this.ready = false;
+    this.mode = null; // 'worker' | 'main'
+    this.loaded = new Set();
+    this.enabling = {};
+    this.waiters = {};
+    this.pending = null;
+    this.busySince = 0;
     this.lastTime = -1;
-    this.result = { hands: [], face: null, pose: null };
-    this._loading = {};
   }
 
   async init() {
-    this.fileset = await FilesetResolver.forVisionTasks(new URL('mediapipe/wasm', document.baseURI).href);
-    this.hand = await create(HandLandmarker, this.fileset, {
-      baseOptions: { modelAssetPath: MODELS.hand },
-      runningMode: 'VIDEO',
-      numHands: 2,
-      minHandDetectionConfidence: 0.5,
-      minHandPresenceConfidence: 0.5,
-      minTrackingConfidence: 0.5,
+    const wasmBase = new URL('mediapipe/wasm', document.baseURI).href;
+    const models = modelUrls();
+    try {
+      await this.startWorker(wasmBase, models);
+      this.mode = 'worker';
+    } catch (err) {
+      console.warn('Tracking worker unavailable, tracking on the main thread', err);
+      this.worker?.terminate();
+      this.worker = null;
+      this.core = new TrackerCore();
+      await this.core.init(wasmBase, models);
+      this.mode = 'main';
+    }
+    this.loaded.add('hand');
+    this.ready = true;
+  }
+
+  startWorker(wasmBase, models) {
+    return new Promise((resolve, reject) => {
+      const w = new TrackerWorker();
+      this.worker = w;
+      const timer = setTimeout(() => reject(new Error('tracking worker timed out')), 25000);
+      w.onerror = (e) => { clearTimeout(timer); reject(new Error(e.message || 'worker failed')); };
+      w.onmessage = ({ data }) => {
+        if (data.type === 'ready') {
+          clearTimeout(timer);
+          w.onmessage = (ev) => this.onMessage(ev.data);
+          resolve();
+        } else if (data.type === 'error') {
+          clearTimeout(timer);
+          reject(new Error(data.message));
+        }
+      };
+      w.postMessage({ type: 'init', wasmBase, models });
     });
   }
 
-  // Face and pose models load lazily the first time they're switched on.
-  async enable(kind) {
-    if (this[kind] || this._loading[kind]) return this._loading[kind];
-    this._loading[kind] = (async () => {
-      if (kind === 'face') {
-        this.face = await create(FaceLandmarker, this.fileset, {
-          baseOptions: { modelAssetPath: MODELS.face },
-          runningMode: 'VIDEO',
-          numFaces: 1,
-          outputFaceBlendshapes: true,
-        });
-      } else if (kind === 'pose') {
-        this.pose = await create(PoseLandmarker, this.fileset, {
-          baseOptions: { modelAssetPath: MODELS.pose },
-          runningMode: 'VIDEO',
-          numPoses: 1,
-        });
-      }
-    })();
-    return this._loading[kind];
+  onMessage(msg) {
+    if (msg.type === 'result') {
+      this.pending = msg.result;
+      this.busySince = 0;
+    } else if (msg.type === 'enabled') {
+      this.loaded.add(msg.kind);
+      this.waiters[msg.kind]?.resolve();
+    } else if (msg.type === 'error') {
+      if (msg.of === 'frame') this.busySince = 0;
+      if (msg.of === 'enable') this.waiters[msg.kind]?.reject(new Error(msg.message));
+    }
   }
 
-  // Runs detection on the current video frame. Hands run every frame; face and
-  // pose alternate on the frames in between to keep phones responsive.
-  detect(video, { face, pose }) {
-    if (!this.hand || video.readyState < 2 || !video.videoWidth) return null;
-    if (video.currentTime === this.lastTime) return null;
-    this.lastTime = video.currentTime;
+  has(kind) {
+    return this.loaded.has(kind);
+  }
+
+  // Face, body and object models load the first time they're switched on.
+  enable(kind) {
+    if (this.loaded.has(kind)) return Promise.resolve();
+    if (!this.enabling[kind]) {
+      this.enabling[kind] = this.mode === 'main'
+        ? this.core.enable(kind).then(() => { this.loaded.add(kind); })
+        : new Promise((resolve, reject) => {
+          this.waiters[kind] = { resolve, reject };
+          this.worker.postMessage({ type: 'enable', kind });
+        });
+      this.enabling[kind].catch(() => { delete this.enabling[kind]; });
+    }
+    return this.enabling[kind];
+  }
+
+  detect(video, opts) {
+    if (!this.ready || video.readyState < 2 || !video.videoWidth) return null;
+    if (this.mode === 'main') {
+      if (video.currentTime === this.lastTime) return null;
+      this.lastTime = video.currentTime;
+      return this.core.run(video, performance.now(), opts);
+    }
     const now = performance.now();
-    this.frame++;
-
-    const h = this.hand.detectForVideo(video, now);
-    this.result.hands = h.landmarks.map((lm, i) => ({
-      lm,
-      wl: h.worldLandmarks[i],
-      label: h.handedness[i]?.[0]?.categoryName ?? '',
-    }));
-
-    if (!face) this.result.face = null;
-    else if (this.face && this.frame % 2 === 0) {
-      const f = this.face.detectForVideo(video, now);
-      this.result.face = f.faceLandmarks[0]
-        ? { lm: f.faceLandmarks[0], blend: blendMap(f.faceBlendshapes[0]) }
-        : null;
+    if (this.busySince && now - this.busySince > 2000) this.busySince = 0; // lost frame: move on
+    if (!this.busySince && video.currentTime !== this.lastTime) {
+      this.lastTime = video.currentTime;
+      this.busySince = now;
+      createImageBitmap(video).then(
+        (bitmap) => this.worker.postMessage({ type: 'frame', bitmap, now: performance.now(), opts }, [bitmap]),
+        () => { this.busySince = 0; },
+      );
     }
-
-    if (!pose) this.result.pose = null;
-    else if (this.pose && this.frame % 2 === 1) {
-      const p = this.pose.detectForVideo(video, now);
-      this.result.pose = p.landmarks[0] ? { lm: p.landmarks[0] } : null;
-    }
-    return this.result;
+    const r = this.pending;
+    this.pending = null;
+    return r;
   }
-}
-
-function blendMap(b) {
-  const out = {};
-  for (const c of b?.categories ?? []) out[c.categoryName] = c.score;
-  return out;
 }
 
 // Turns face blendshape scores into a short list of readable expressions.

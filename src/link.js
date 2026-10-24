@@ -32,16 +32,17 @@ export function normalizeCode(s) {
 
 // Runs on the PC: waits for a phone to call in with its camera.
 export class Receiver {
-  constructor({ onStream, onMessage, onStatus }) {
+  // code: reuse a previous pairing code if there is one.
+  constructor({ code, onStream, onMessage, onStatus }) {
     this.onStream = onStream;
     this.onMessage = onMessage;
     this.onStatus = onStatus;
-    this._open();
+    this._open(normalizeCode(code ?? '').length === 6 ? normalizeCode(code) : makeCode());
   }
 
-  _open() {
+  _open(code = makeCode()) {
     const { onStream, onMessage, onStatus } = this;
-    this.code = makeCode();
+    this.code = code;
     this.peer = new Peer(PREFIX + this.code, peerOptions());
     this.peer.on('open', () => onStatus('waiting'));
     this.peer.on('error', (err) => {

@@ -3,7 +3,23 @@ import { HAND_CONNECTIONS, FACE_CONTOURS, POSE_CONNECTIONS } from './tracker.js'
 // Draws the tracking results on a 2D canvas over the 3D view in a neon style.
 
 const HAND_COLORS = ['#4fd1c5', '#f472b6'];
-const HOLD_ICONS = { fist: '↶ undo', peace: '✌ next shape' };
+const HOLD_ICONS = { fist: '↶ undo', peace: '✌ next shape', open: '☰ menu' };
+const ANCHOR_ICONS = { face: '🙂', hand: '✋', body: '🧍' };
+
+// Neon line glow without canvas shadows (which are slow): a wide, faint
+// stroke under a thin, bright one.
+function glowStroke(g, color, width, alpha = 1) {
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.strokeStyle = color;
+  g.globalAlpha = alpha * 0.25;
+  g.lineWidth = width * 3.5;
+  g.stroke();
+  g.globalAlpha = alpha;
+  g.lineWidth = width;
+  g.stroke();
+  g.globalAlpha = 1;
+}
 
 export class Overlay {
   constructor(canvas) {
@@ -19,19 +35,69 @@ export class Overlay {
     this.g.setTransform(pr, 0, 0, pr, 0, 0);
   }
 
-  draw({ hands, face, pose, mirror, showSkeleton, color, holdTime, t }) {
+  draw({ hands, face, pose, mirror, showSkeleton, color, holdTimes, menuOpen, mouth, anchors, t }) {
     const { g, w, h } = this;
     g.clearRect(0, 0, w, h);
     const X = (p) => (mirror ? 1 - p.x : p.x) * w;
     const Y = (p) => p.y * h;
 
+    // Stick mode: what the camera recognizes, as labeled corner brackets.
+    for (const a of anchors ?? []) {
+      const x = a.box.x * w;
+      const y = a.box.y * h;
+      const bw = a.box.w * w;
+      const bh = a.box.h * h;
+      const k = Math.min(18, bw / 3, bh / 3);
+      const c = a.stuck ? '#facc15' : '#ffffff';
+      g.save();
+      g.strokeStyle = c;
+      g.shadowColor = c;
+      g.shadowBlur = 10;
+      g.lineWidth = 2.5;
+      g.globalAlpha = 0.85;
+      g.beginPath();
+      for (const [cx, cy, dx, dy] of [[x, y, 1, 1], [x + bw, y, -1, 1], [x, y + bh, 1, -1], [x + bw, y + bh, -1, -1]]) {
+        g.moveTo(cx + dx * k, cy);
+        g.lineTo(cx, cy);
+        g.lineTo(cx, cy + dy * k);
+      }
+      g.stroke();
+      const label = `${ANCHOR_ICONS[a.label] ?? '📦'} ${a.label}${a.score ? ` ${Math.round(a.score * 100)}%` : ''}${a.stuck ? ` · 📌${a.stuck}` : ''}`;
+      g.font = '600 12px system-ui, sans-serif';
+      const tw = g.measureText(label).width + 12;
+      g.shadowBlur = 0;
+      g.globalAlpha = 0.75;
+      g.fillStyle = '#07090d';
+      g.fillRect(x, y - 20, tw, 18);
+      g.globalAlpha = 1;
+      g.fillStyle = c;
+      g.fillText(label, x + 6, y - 7);
+      g.restore();
+    }
+
+    // Eating: a ring around your mouth when something tasty is in range.
+    if (mouth?.target) {
+      const r = Math.max(18, mouth.r * w * 0.8) * (mouth.armed ? 1.25 + Math.sin(t * 20) * 0.08 : 1);
+      g.save();
+      g.strokeStyle = mouth.armed ? '#fb923c' : '#f472b6';
+      g.shadowColor = g.strokeStyle;
+      g.shadowBlur = 18;
+      g.lineWidth = 3;
+      g.setLineDash([6, 6]);
+      g.lineDashOffset = -t * 30;
+      g.beginPath();
+      g.arc(mouth.x * w, mouth.y * h, r, 0, Math.PI * 2);
+      g.stroke();
+      g.setLineDash([]);
+      g.fillStyle = '#fff';
+      g.font = '600 13px system-ui, sans-serif';
+      g.textAlign = 'center';
+      g.fillText(mouth.armed ? 'now close! 😋' : 'open wide 😮', mouth.x * w, mouth.y * h + r + 18);
+      g.restore();
+    }
+
     if (pose) {
       g.save();
-      g.strokeStyle = 'rgba(167, 139, 250, 0.85)';
-      g.shadowColor = '#a78bfa';
-      g.shadowBlur = 12;
-      g.lineWidth = 3;
-      g.lineCap = 'round';
       g.beginPath();
       for (const { start, end } of POSE_CONNECTIONS) {
         const a = pose.lm[start];
@@ -40,16 +106,12 @@ export class Overlay {
         g.moveTo(X(a), Y(a));
         g.lineTo(X(b), Y(b));
       }
-      g.stroke();
+      glowStroke(g, '#a78bfa', 3, 0.85);
       g.restore();
     }
 
     if (face) {
       g.save();
-      g.strokeStyle = 'rgba(253, 224, 71, 0.55)';
-      g.shadowColor = '#fde047';
-      g.shadowBlur = 8;
-      g.lineWidth = 1.2;
       g.beginPath();
       for (const { start, end } of FACE_CONTOURS) {
         const a = face.lm[start];
@@ -57,7 +119,7 @@ export class Overlay {
         g.moveTo(X(a), Y(a));
         g.lineTo(X(b), Y(b));
       }
-      g.stroke();
+      glowStroke(g, '#fde047', 1.2, 0.6);
       g.restore();
     }
 
@@ -70,18 +132,12 @@ export class Overlay {
 
       if (showSkeleton && hand.lm) {
         g.save();
-        g.strokeStyle = col;
-        g.shadowColor = col;
-        g.shadowBlur = 14;
-        g.lineWidth = 2.5;
-        g.lineCap = 'round';
-        g.globalAlpha = 0.9;
         g.beginPath();
         for (const { start, end } of HAND_CONNECTIONS) {
           g.moveTo(hx(hand.lm[start]), hy(hand.lm[start]));
           g.lineTo(hx(hand.lm[end]), hy(hand.lm[end]));
         }
-        g.stroke();
+        glowStroke(g, col, 2.5, 0.9);
         g.fillStyle = '#fff';
         for (const p of hand.lm) {
           g.beginPath();
@@ -130,7 +186,8 @@ export class Overlay {
       g.restore();
 
       // Hold-to-trigger gestures show a filling ring at the wrist.
-      if (HOLD_ICONS[hand.gesture] && hand.gestureTime > 0.15 && hand.lm) {
+      const holdTime = holdTimes?.[hand.gesture];
+      if (holdTime && !(hand.gesture === 'open' && menuOpen) && hand.gestureTime > 0.15 && hand.lm) {
         const k = Math.min(1, (hand.gestureTime - 0.15) / (holdTime - 0.15));
         const wx = hx(hand.lm[0]);
         const wy = hy(hand.lm[0]) - 10;

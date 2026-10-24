@@ -17,7 +17,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 // Shapes keep their size on an inner node, so strokes drawn onto a shape (its
 // children) aren't stretched by it.
 
-export const SHAPES = ['bar', 'box', 'sphere', 'cylinder', 'cone', 'torus'];
+export const SHAPES = ['board', 'slime', 'bar', 'box', 'sphere', 'cylinder', 'cone', 'torus'];
 export const holoTime = { value: 0 };
 export const lineMaterials = new Set();
 const lineResolution = { x: 1, y: 1 };
@@ -87,6 +87,49 @@ function holoMaterial(color) {
   });
 }
 
+// Slime: glossy, see-through goo whose surface wobbles. `wobble` is driven by
+// the physics (how hard it was just shaken or squashed).
+const slimeVertex = /* glsl */ `
+  uniform float time;
+  uniform float wobble;
+  varying vec3 vN;
+  varying vec3 vV;
+  void main() {
+    vec3 p = position;
+    float w = sin(p.x * 13.0 + time * 9.0) * sin(p.y * 11.0 + time * 7.0) * sin(p.z * 12.0 + time * 8.0);
+    p += normal * (w * (0.015 + wobble * 0.09) + sin(time * 2.0 + p.y * 6.0) * 0.012);
+    vec4 mv = modelViewMatrix * vec4(p, 1.0);
+    vN = normalize(normalMatrix * normal);
+    vV = normalize(-mv.xyz);
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+
+const slimeFragment = /* glsl */ `
+  uniform vec3 color;
+  uniform float highlight;
+  varying vec3 vN;
+  varying vec3 vV;
+  void main() {
+    vec3 n = normalize(vN);
+    float facing = max(dot(n, normalize(vV)), 0.0);
+    float rim = pow(1.0 - facing, 2.0);
+    vec3 l = normalize(vec3(-0.4, 0.8, 0.6));
+    float spec = pow(max(dot(reflect(-l, n), normalize(vV)), 0.0), 40.0);
+    vec3 c = color * (0.35 + 0.45 * facing + rim * 0.8 + highlight * 0.3) + vec3(spec * 0.9);
+    gl_FragColor = vec4(min(c, vec3(1.0)), 0.55 + rim * 0.35 + spec * 0.3);
+  }
+`;
+
+function slimeMaterial(color) {
+  return new ShaderMaterial({
+    uniforms: { color: { value: glow(color) }, time: holoTime, wobble: { value: 0 }, highlight: { value: 0 } },
+    vertexShader: slimeVertex,
+    fragmentShader: slimeFragment,
+    transparent: true,
+  });
+}
+
 function edgeMaterial(color, width = 2.5, brightness = 1) {
   const m = new LineMaterial({ color: glow(color, 0.2).multiplyScalar(brightness), linewidth: width, transparent: true });
   m.resolution.set(lineResolution.x, lineResolution.y);
@@ -117,6 +160,7 @@ function edgesFrom(geo, threshold = 1) {
 }
 
 const bodies = {
+  board: () => once('box', () => new BoxGeometry(1, 1, 1)),
   bar: () => once('box', () => new BoxGeometry(1, 1, 1)),
   box: () => once('box', () => new BoxGeometry(1, 1, 1)),
   sphere: () => once('sphere', () => new SphereGeometry(0.5, 48, 32)),
@@ -126,6 +170,10 @@ const bodies = {
 };
 
 const edges = {
+  board: () => once('e-board', () => new LineSegmentsGeometry().setPositions([
+    -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5,
+    0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5,
+  ])),
   bar: () => once('e-box', () => edgesFrom(new BoxGeometry(1, 1, 1))),
   box: () => once('e-box', () => edgesFrom(new BoxGeometry(1, 1, 1))),
   sphere: () => once('e-sphere', () => new LineSegmentsGeometry().fromWireframeGeometry(new WireframeGeometry(new IcosahedronGeometry(0.503, 1)))),
@@ -154,13 +202,15 @@ function hatchGeometry({ n, slant }) {
   return new LineSegmentsGeometry().setPositions(pos);
 }
 
-function strokeGeometry(pts, radius) {
+// live: a cheaper tube without end caps, rebuilt as the stroke grows.
+function strokeGeometry(pts, radius, live = false) {
   const n = pts.length / 3;
   const cap = (i) => new SphereGeometry(radius, 12, 8).translate(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
   if (n < 2) return cap(0);
   const points = [];
   for (let i = 0; i < n; i++) points.push(new Vector3(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]));
   const curve = new CatmullRomCurve3(points, false, 'centripetal');
+  if (live) return new TubeGeometry(curve, Math.min(n * 2, 300), radius, 6, false);
   const tube = new TubeGeometry(curve, Math.min(n * 4, 800), radius, 8, false);
   tube.deleteAttribute('uv');
   const a = cap(0); a.deleteAttribute('uv');
@@ -176,11 +226,49 @@ function buildStroke(data) {
   return mesh;
 }
 
+// Faint grid on a drawing board, like graph paper.
+function boardGrid() {
+  return once('board-grid', () => {
+    const pos = [];
+    for (let i = 1; i < 6; i++) {
+      const k = -0.5 + i / 6;
+      pos.push(k, -0.5, 0.51, k, 0.5, 0.51, -0.5, k, 0.51, 0.5, k, 0.51);
+    }
+    return new LineSegmentsGeometry().setPositions(pos);
+  });
+}
+
+function boardMaterial() {
+  const m = new MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.14, depthWrite: false, side: DoubleSide });
+  m.userData.board = true;
+  return m;
+}
+
 function buildShape(data) {
   const g = new Group();
   const inner = new Group();
   inner.name = 'inner';
   inner.scale.fromArray(data.dims);
+  if (data.shape === 'board') {
+    // A white, glowing drawing area: point at it to draw on it.
+    const body = new Mesh(bodies.board(), boardMaterial());
+    body.userData.pick = true;
+    body.userData.noGlow = true; // a big white panel would wash out the glow
+    body.renderOrder = 1;
+    inner.add(body);
+    inner.add(new LineSegments2(edges.board(), edgeMaterial('#ffffff', 3.5)));
+    inner.add(new LineSegments2(boardGrid(), edgeMaterial('#ffffff', 1, 0.18)));
+    g.add(inner);
+    return g;
+  }
+  if (data.shape === 'slime') {
+    const body = new Mesh(bodies.sphere(), slimeMaterial(data.color));
+    body.name = 'slime';
+    body.userData.pick = true;
+    inner.add(body);
+    g.add(inner);
+    return g;
+  }
   const body = new Mesh(bodies[data.shape](), holoMaterial(data.color));
   body.userData.pick = true;
   body.renderOrder = 1;
@@ -219,11 +307,17 @@ export function disposeObject(obj) {
   });
 }
 
-// Live strokes grow point by point while you draw.
+// Live strokes grow point by point while you draw...
 export function setStrokePoints(mesh, pts) {
   mesh.userData.data.pts = pts;
   mesh.geometry.dispose();
-  mesh.geometry = strokeGeometry(pts, mesh.userData.data.radius);
+  mesh.geometry = strokeGeometry(pts, mesh.userData.data.radius, true);
+}
+
+// ...and get their smooth, capped final shape when you stop.
+export function finishStroke(mesh) {
+  mesh.geometry.dispose();
+  mesh.geometry = strokeGeometry(mesh.userData.data.pts, mesh.userData.data.radius);
 }
 
 const WHITE = new Color('#fff');
@@ -235,6 +329,7 @@ export function setHighlight(obj, on) {
     const m = o.material;
     if (!m) return;
     if (m.uniforms?.highlight) m.uniforms.highlight.value = on ? 1 : 0;
+    else if (m.userData.board) m.opacity = on ? 0.26 : 0.14;
     else if (m.userData.base) m.color.copy(m.userData.base).lerp(WHITE, on ? 0.55 : 0);
   };
   // Highlight the object itself but not strokes drawn on it.
@@ -286,7 +381,19 @@ export function shapeFromHands(shape, A, B, camQ, t, color) {
     q.setFromRotationMatrix(_m.makeBasis(_x, _y, _z));
   };
 
-  if (shape === 'bar') {
+  if (shape === 'board') {
+    // The two pinch points are opposite corners of the area, facing you.
+    q.copy(camQ);
+    const inv = camQ.clone().invert();
+    _a.copy(A).applyQuaternion(inv);
+    _b.copy(B).applyQuaternion(inv);
+    let sx = Math.abs(_a.x - _b.x);
+    let sy = Math.abs(_a.y - _b.y);
+    sx = Math.max(sx, sy * 0.4, 0.02);
+    sy = Math.max(sy, sx * 0.4, 0.02);
+    dims = [sx, sy, 0.004];
+    color = '#ffffff';
+  } else if (shape === 'bar') {
     alongAxis('x');
     const h = Math.max(t * 2.2, len * 0.17);
     dims = [len, h, Math.max(t, h * 0.3)];

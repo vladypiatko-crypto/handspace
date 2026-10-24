@@ -8,7 +8,7 @@ const camera = new PerspectiveCamera();
 camera.updateMatrixWorld();
 
 // Rough flat hand, meters, wrist at origin, fingers pointing up (-y in image).
-function makeHand({ pinch = false, fist = false, peace = false, point = false } = {}) {
+function makeHand({ pinch = false, fist = false, peace = false, point = false, reach = false } = {}) {
   const p = [];
   p[0] = [0, 0, 0];
   const fingers = { 1: -0.035, 5: -0.02, 9: 0, 13: 0.018, 17: 0.035 };
@@ -20,7 +20,9 @@ function makeHand({ pinch = false, fist = false, peace = false, point = false } 
   const curl = (b) => { p[b + 2] = [p[b][0], 0.07, 0.02]; p[b + 3] = [p[b][0], 0.05, 0.01]; };
   if (fist) [5, 9, 13, 17].forEach(curl);
   if (peace) [13, 17].forEach(curl);
-  if (point) [9, 13, 17].forEach(curl);
+  if (point || reach) [9, 13, 17].forEach(curl);
+  // About to pinch: index bent toward the thumb, thumb coming in.
+  if (reach) { p[7] = [-0.03, 0.125, 0.02]; p[8] = [-0.04, 0.115, 0.035]; p[4] = [-0.06, 0.09, 0.02]; }
   if (pinch) { p[8] = [-0.03, 0.12, 0.01]; p[4] = [-0.035, 0.115, 0.012]; }
   return p.map(([x, y, z]) => ({ x, y, z }));
 }
@@ -58,7 +60,7 @@ for (const d of [0.3, 0.5, 0.9]) {
   check('pinch ends', !input.hands[0].pinching && input.hands[0].ended);
   for (let i = 0; i < 3; i++) input.update([], view, camera, (t += 0.033));
   check('brief dropout keeps hand', input.hands[0].present);
-  for (let i = 0; i < 3; i++) input.update([], view, camera, (t += 0.033));
+  for (let i = 0; i < 6; i++) input.update([], view, camera, (t += 0.033));
   check('long dropout loses hand', !input.hands[0].present);
 }
 
@@ -81,6 +83,8 @@ for (const d of [0.3, 0.5, 0.9]) {
   check('point gesture recognized', input.hands[0].gesture === 'point', input.hands[0].gesture);
   check('one frame of pointing does not draw yet', !input.hands[0].drawing);
   step({ point: true });
+  step({ point: true });
+  step({ point: true });
   check('drawing starts after debounce', input.hands[0].drawing && input.hands[0].drawStarted);
   step({ point: true });
   check('drawStarted fires once', !input.hands[0].drawStarted);
@@ -94,6 +98,30 @@ for (const d of [0.3, 0.5, 0.9]) {
   check('drawing ends after pointing stops', !h.drawing && h.drawEnded);
   step({ pinch: true });
   check('pinch does not draw', !h.drawing && h.pinching);
+  for (let i = 0; i < 6; i++) step({ point: true });
+  check('no drawing right after a pinch', !h.drawing);
+  for (let i = 0; i < 12; i++) step({ point: true });
+  check('pointing draws again after a moment', h.drawing);
+}
+
+{
+  // Reaching to pinch (bent index, thumb coming in) must not draw.
+  const input = new HandInput();
+  let t = 0;
+  for (let i = 0; i < 10; i++) input.update([frame(makeHand({ reach: true }), 0.5)], view, camera, (t += 0.033));
+  check('reaching to pinch is not pointing', input.hands[0].gesture !== 'point' && !input.hands[0].drawing, input.hands[0].gesture);
+}
+
+{
+  // Twisting the hand rotates its orientation.
+  const input = new HandInput();
+  let t = 0;
+  for (let i = 0; i < 20; i++) input.update([frame(makeHand(), 0.5)], view, camera, (t += 0.033));
+  const q0 = input.hands[0].rot.clone();
+  const twisted = makeHand().map((p) => ({ x: p.x * Math.cos(0.6) - p.z * Math.sin(0.6), y: p.y, z: p.x * Math.sin(0.6) + p.z * Math.cos(0.6) }));
+  for (let i = 0; i < 20; i++) input.update([frame(twisted, 0.5)], view, camera, (t += 0.033));
+  const angle = q0.angleTo(input.hands[0].rot);
+  check('wrist twist is tracked', Math.abs(angle - 0.6) < 0.1, `${angle.toFixed(2)} rad`);
 }
 
 {

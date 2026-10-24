@@ -249,3 +249,43 @@ summary { cursor: pointer; color: var(--accent); }
 /* Phone "screen off" while it's streaming as a camera */
 #dim { position: fixed; inset: 0; z-index: 10; background: #000; display: grid; place-items: center; }
 #dim span { color: #1f2630; font-size: 13px; animation: blink 3s ease-in-out infinite; }
+
+/* ------------------------------------------------------------ hands-free control */
+
+/* Buttons under a hand's pinch point light up; pinching presses them. */
+.air-hover {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 70%, transparent) !important;
+}
+.air-press { transform: scale(0.9) !important; background: color-mix(in srgb, var(--accent) 45%, transparent) !important; }
+
+/* Ring menu that opens around an open palm. */
+#palm-menu {
+  position: fixed; width: 0; height: 0; z-index: 5; --r: 140px;
+  animation: palm-in 0.25s cubic-bezier(0.2, 1.3, 0.4, 1);
+}
+@keyframes palm-in { from { transform: scale(0.4); opacity: 0; } }
+#palm-menu .palm-center {
+  position: absolute; left: 0; top: 0; transform: translate(-50%, -50%);
+  width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; text-align: center;
+  font-size: 12px; color: var(--muted); pointer-events: none;
+  background: radial-gradient(circle, rgba(14, 18, 26, 0.6), transparent 70%);
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+}
+#palm-menu .palm-item {
+  position: absolute; left: 0; top: 0; width: 68px; height: 68px; border-radius: 50%; padding: 0;
+  transform: translate(-50%, -50%) rotate(var(--a)) translate(var(--r)) rotate(calc(-1 * var(--a)));
+  display: grid; place-items: center; align-content: center; gap: 1px;
+  background: var(--panel); backdrop-filter: blur(12px); border: 1px solid var(--line);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+#palm-menu .palm-item .i { font-size: 22px; line-height: 1; }
+#palm-menu .palm-item .l { font-size: 10px; color: var(--muted); max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#palm-menu .palm-item.active { border-color: var(--accent); box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 55%, transparent); }
+#palm-menu .palm-item.air-press { transform: translate(-50%, -50%) rotate(var(--a)) translate(var(--r)) rotate(calc(-1 * var(--a))) scale(0.88) !important; }
+#palm-menu .dot { display: inline-block; width: 20px; height: 20px; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
+@media (max-width: 760px) {
+  #palm-menu .palm-item { width: 56px; height: 56px; }
+  #palm-menu .palm-item .i { font-size: 18px; }
+}

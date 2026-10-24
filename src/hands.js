@@ -1,4 +1,4 @@
-import { Vector3 } from 'three';
+import { Matrix4, Quaternion, Vector3 } from 'three';
 
 // One Euro filter: smooths jitter when the hand is still, stays responsive when
 // it moves fast. (Casiez et al. 2012, the standard filter for hand tracking.)
@@ -35,9 +35,22 @@ const PALM = [[0, 5], [0, 17], [5, 17], [0, 9]];
 const FINGERS = [[8, 6], [12, 10], [16, 14], [20, 18]]; // [tip, middle joint]
 const PINCH_ON = 0.32; // thumb–index gap as a fraction of palm length
 const PINCH_OFF = 0.5;
-const GRACE_FRAMES = 4; // keep a hand alive briefly when tracking drops a frame
-const POINT_ON_FRAMES = 2; // frames of pointing before drawing starts
+const GRACE_FRAMES = 8; // keep a hand alive briefly when tracking drops out (e.g. in front of the face)
+const POINT_ON_FRAMES = 4; // frames of clear pointing before drawing starts
 const POINT_OFF_FRAMES = 3; // frames of not pointing before drawing stops
+const AFTER_PINCH = 0.45; // seconds after a pinch during which pointing doesn't draw
+const POINT_THUMB_GAP = 0.7; // pointing needs the thumb clearly away from the index tip
+const POINT_STRAIGHT = 0.9; // and the index finger nearly straight
+
+// How straight a finger is: 1 = perfectly straight.
+const straightness = (wl, a, b, c, d) =>
+  dist3(wl[a], wl[d]) / (dist3(wl[a], wl[b]) + dist3(wl[b], wl[c]) + dist3(wl[c], wl[d]));
+
+const _x = new Vector3();
+const _y = new Vector3();
+const _z = new Vector3();
+const _m = new Matrix4();
+const _q = new Quaternion();
 
 export class Hand {
   constructor(id) {
@@ -57,6 +70,10 @@ export class Hand {
     this.drawEnded = false;
     this.pointOn = 0;
     this.pointOff = 0;
+    this.pinchEndT = -1; // when the last pinch ended (seconds)
+    this.captured = false; // this pinch/point is pressing a UI button, not acting in 3D
+    this.rot = new Quaternion(); // hand orientation in world space (for twisting objects)
+    this.palmScreen = { x: 0.5, y: 0.5 };
     this.lm = null; // landmarks in screen space (0..1)
     this.depth = 0.5;
     this.label = '';
@@ -73,6 +90,19 @@ export class Hand {
   get cursorScreen() { return this.drawing || this.gesture === 'point' ? this.tipScreen : this.screen; }
 }
 
+// A detection that sits almost entirely inside the face, with a shaky
+// left/right confidence, is usually the face being misread as a hand.
+function looksLikeFace(hand, faceLm) {
+  if (!faceLm || (hand.score ?? 1) > 0.85) return false;
+  let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+  for (const p of faceLm) {
+    x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
+    y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
+  }
+  const inside = hand.lm.filter((p) => p.x > x0 && p.x < x1 && p.y > y0 && p.y < y1).length;
+  return inside / hand.lm.length > 0.85;
+}
+
 export class HandInput {
   constructor() {
     this.hands = [new Hand(0), new Hand(1)];
@@ -83,14 +113,16 @@ export class HandInput {
     return this.hands.filter((h) => h.present);
   }
 
-  // raw: [{ lm, wl, label }] from the tracker. view: { W, H, f, mirror }.
-  update(raw, view, camera, t) {
+  // raw: [{ lm, wl, label, score }] from the tracker. view: { W, H, f, mirror }.
+  // faceLm (optional): face landmarks, to throw out "hands" that are really
+  // part of the face.
+  update(raw, view, camera, t, faceLm = null) {
     const dt = this.lastT ? Math.min(t - this.lastT, 0.2) : 0;
     this.lastT = t;
     this._resetEvents();
 
     const toScreen = (lm) => lm.map((p) => ({ x: view.mirror ? 1 - p.x : p.x, y: p.y, z: p.z }));
-    const items = raw.map((r) => ({ ...r, slm: toScreen(r.lm) }));
+    const items = raw.filter((r) => !looksLikeFace(r, faceLm)).map((r) => ({ ...r, slm: toScreen(r.lm) }));
     const assigned = this._assign(items);
 
     this.hands.forEach((h, i) => {
@@ -117,7 +149,10 @@ export class HandInput {
       const palm = dist3(wl[0], wl[9]) || 0.09;
       const gap = dist3(wl[4], wl[8]) / palm;
       const indexForward = dist3(wl[0], wl[8]) > dist3(wl[0], wl[6]) * 0.95;
-      this._setPinch(h, h.pinching ? gap < PINCH_OFF : gap < PINCH_ON && indexForward);
+      this._setPinch(h, h.pinching ? gap < PINCH_OFF : gap < PINCH_ON && indexForward, t);
+      this._orient(h, wl, view.mirror, camera, !h.rotInit);
+      h.palmScreen.x = (slm[0].x + slm[5].x + slm[9].x + slm[13].x + slm[17].x) / 5;
+      h.palmScreen.y = (slm[0].y + slm[5].y + slm[9].y + slm[13].y + slm[17].y) / 5;
 
       const u = (slm[4].x + slm[8].x) / 2;
       const v = (slm[4].y + slm[8].y) / 2;
@@ -126,15 +161,35 @@ export class HandInput {
 
       const ext = FINGERS.map(([tip, pip]) => dist3(wl[0], wl[tip]) > dist3(wl[0], wl[pip]) * 1.12);
       const curled = FINGERS.map(([tip, pip]) => dist3(wl[0], wl[tip]) < dist3(wl[0], wl[pip]));
+      const tucked = FINGERS.map(([tip, pip]) => dist3(wl[0], wl[tip]) < dist3(wl[0], wl[pip]) * 1.05);
+      // A real point: straight index, thumb away from it (so not on the way to a
+      // pinch) and the other three fingers folded.
+      const pointing = ext[0] && tucked[1] && tucked[2] && tucked[3]
+        && straightness(wl, 5, 6, 7, 8) > POINT_STRAIGHT && gap > POINT_THUMB_GAP;
       let g = 'hand';
       if (h.pinching) g = 'pinch';
       else if (curled.every(Boolean)) g = 'fist';
       else if (ext[0] && ext[1] && curled[2] && curled[3]) g = 'peace';
       else if (ext.every(Boolean)) g = 'open';
-      else if (ext[0] && !ext[1] && !ext[2] && !ext[3]) g = 'point';
+      else if (pointing) g = 'point';
       this._setGesture(h, g, dt);
-      this._setDrawing(h, g === 'point');
+      this._setDrawing(h, g === 'point' && t - h.pinchEndT > AFTER_PINCH);
     });
+  }
+
+  // Hand orientation from the palm (wrist → middle knuckle, index → pinky
+  // knuckle), turned into world space. Smoothed, since it's used to rotate
+  // held objects.
+  _orient(h, wl, mirror, camera, snap) {
+    const P = (i) => new Vector3(mirror ? -wl[i].x : wl[i].x, -wl[i].y, -wl[i].z);
+    _y.subVectors(P(9), P(0)).normalize();
+    _x.subVectors(P(17), P(5)).normalize();
+    _z.crossVectors(_x, _y).normalize();
+    _x.crossVectors(_y, _z).normalize();
+    _q.setFromRotationMatrix(_m.makeBasis(_x, _y, _z)).premultiply(camera.quaternion);
+    if (snap) h.rot.copy(_q);
+    else h.rot.slerp(_q, 0.35);
+    h.rotInit = true;
   }
 
   // Drives hands from the mouse / touch instead of the camera.
@@ -153,7 +208,10 @@ export class HandInput {
       h.depth = vh.depth;
       h.filter.reset();
       h.tipFilter.reset();
-      this._setPinch(h, vh.pinching);
+      h.rot.copy(camera.quaternion); // the mouse can't twist
+      h.palmScreen.x = vh.u;
+      h.palmScreen.y = vh.v;
+      this._setPinch(h, vh.pinching, t);
       this._place(h, vh.u, vh.v, view, camera, t);
       this._placeTip(h, vh.u, vh.v, view, camera, t);
       const g = vh.pinching ? 'pinch' : vh.pointing ? 'point' : 'hand';
@@ -166,6 +224,7 @@ export class HandInput {
     for (const h of this.hands) {
       h.started = h.ended = false;
       h.drawStarted = h.drawEnded = false;
+      if (!h.pinching && !h.drawing) h.captured = false;
     }
   }
 
@@ -201,9 +260,9 @@ export class HandInput {
     }
   }
 
-  _setPinch(h, on) {
+  _setPinch(h, on, t) {
     if (on && !h.pinching) h.started = true;
-    if (!on && h.pinching) h.ended = true;
+    if (!on && h.pinching) { h.ended = true; h.pinchEndT = t; }
     h.pinching = on;
   }
 
@@ -220,6 +279,7 @@ export class HandInput {
     if (h.pinching) { h.pinching = false; h.ended = true; }
     if (h.drawing) { h.drawing = false; h.drawEnded = true; }
     h.pointOn = h.pointOff = 0;
+    h.rotInit = false;
     h.gesture = 'none';
     h.gestureTime = 0;
   }

@@ -72,6 +72,7 @@
     </div>
     <div id="hud-right"><span id="fps"></span></div>
     <div id="toast" class="hidden"></div>
+    <div id="palm-menu" class="hidden"></div>
 
     <!-- Pairing panel shown on the PC while waiting for a phone -->
     <div id="pair" class="panel hidden">
@@ -90,7 +91,9 @@
         <button data-tool="erase" title="Erase (E): pinch or point and sweep over things">🧽<span>Erase</span></button>
       </div>
       <div class="group" id="shapes">
-        <button data-shape="bar" class="active" title="Hatched bar">▭</button>
+        <button data-shape="board" class="active" title="Drawing area: pinch both hands to mark its corners">⬜</button>
+        <button data-shape="slime" title="Slime">🟢</button>
+        <button data-shape="bar" title="Hatched bar">▭</button>
         <button data-shape="box" title="Box">◻︎</button>
         <button data-shape="sphere" title="Sphere">◯</button>
         <button data-shape="cylinder" title="Cylinder">⌭</button>
@@ -102,6 +105,10 @@
         <input type="range" id="size" min="2" max="30" value="8" title="Line / shape thickness" />
       </div>
       <div class="group">
+        <button id="physics-btn" title="Gravity: things fall, bounce and can be thrown">🍎<span>Gravity</span></button>
+        <button id="stick-btn" title="Stick: draw on or drop things onto your face, hands or real objects">📌<span>Stick</span></button>
+      </div>
+      <div class="group">
         <button id="undo" title="Undo (Z) — or hold a fist">↶</button>
         <button id="redo" title="Redo (Y)">↷</button>
         <button id="menu-btn" title="Menu">☰</button>
@@ -110,6 +117,10 @@
 
     <div id="menu" class="panel hidden">
       <h2>Settings</h2>
+      <label class="check"><input type="checkbox" data-setting="physics" /> Gravity (things fall, bounce, can be thrown)</label>
+      <label class="check"><input type="checkbox" data-setting="stick" /> Stick things to your face, hands and real objects</label>
+      <label class="check"><input type="checkbox" data-setting="eat" /> Eat things (bring them to your mouth, open, close)</label>
+      <label class="check"><input type="checkbox" data-setting="wristRotate" /> Twist your wrist to rotate what you hold</label>
       <label class="check"><input type="checkbox" data-setting="showSkeleton" /> Show hand skeleton</label>
       <label class="check"><input type="checkbox" data-setting="glow" /> Glow effects (turn off if slow)</label>
       <label class="check"><input type="checkbox" data-setting="face" /> Track face (expressions)</label>
@@ -133,14 +144,15 @@
       <details>
         <summary>Gestures</summary>
         <ul class="gestures">
-          <li><b>☝️ Point</b> with your index finger to draw in the air.</li>
-          <li><b>Point at an object and touch it</b> to draw on it. The drawing sticks to the object and moves with it.</li>
-          <li><b>🤏 Pinch an object</b> (thumb + index) to grab it and move it anywhere.</li>
-          <li><b>Pinch an object with both hands</b> to scale and rotate it.</li>
-          <li><b>🤏🤏 Pinch both hands in empty space and pull apart</b> to stretch a new shape.</li>
-          <li><b>Hold a fist ✊</b> for a moment to undo.</li>
-          <li><b>Hold a peace sign ✌️</b> for a moment to switch to the next shape.</li>
-          <li>Move your hand closer to or further from the camera to work in depth.</li>
+          <li><b>☝️ Point</b> (index finger straight, others folded) to draw in the air.</li>
+          <li><b>🤏 Pinch</b> something to grab it and move it. <b>Twist your wrist</b> to turn it.</li>
+          <li><b>Pinch it with both hands</b> to scale and rotate it.</li>
+          <li><b>🤏🤏 Pinch both hands in empty space and pull apart</b> to mark a white drawing area (or another shape from the shape picker). Point at the area to draw on it.</li>
+          <li><b>✋ Hold your open palm up</b> for a second to open the menu around your hand. <b>Pinch</b> an item to choose it. Pinching any button on screen presses it, so you never need to click.</li>
+          <li><b>Hold a fist ✊</b> to undo. <b>Hold ✌️</b> for the next shape.</li>
+          <li><b>🍎 Gravity:</b> let go while moving to throw. Slime squishes and splats.</li>
+          <li><b>📌 Stick:</b> draw on your face, hand or a recognized object (cup, phone, bottle…), or drop something onto it, and it sticks and moves with it. Grab it to pull it off.</li>
+          <li><b>😋 Eat:</b> bring something to your mouth, open wide, then close. Three bites and it's gone.</li>
           <li><b>Mouse/touch:</b> drag to draw, drag an object to move it, Shift-drag or right-drag for a shape, Alt-drag to draw on an object, scroll for depth.</li>
         </ul>
       </details>

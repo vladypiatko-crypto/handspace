@@ -8,4 +8,7 @@ export default defineConfig({
   plugins: process.env.HTTP ? [] : [basicSsl()],
   server: { host: true },
   build: { target: 'es2022', chunkSizeWarningLimit: 2000 },
+  // MediaPipe loads its runtime with importScripts, which only classic
+  // (non-module) workers have.
+  worker: { format: 'iife' },
 });

@@ -6,18 +6,19 @@ It runs entirely in the browser on PCs, phones and tablets, with nothing to inst
 
 ## Features
 
-- **Hand, face and body tracking** with Google's MediaPipe models (two hands, face expressions, body skeleton).
-- **☝️ Point to draw in 3D.** Move your hand closer to or further from the camera to draw in depth.
-- **Draw on objects.** Point at a shape and touch it; the drawing sticks to the surface and moves with the shape.
-- **🤏 Pinch to move.** Pinch any object to grab it and place it anywhere. Pinch it with both hands to scale and rotate it.
-- **🤏🤏 Pinch both hands and pull apart** in empty space to stretch a hatched bar, box, sphere, cylinder, cone or ring.
-- **Paint and Erase modes** recolor or remove whatever you pinch or point at. To erase, sweep across things.
-- **Hands-free controls.** Hold a fist to undo, and hold a ✌️ to switch to the next shape.
-- **Objects stay in place.** On a phone or tablet, turn on *Lock objects to the room*. The gyroscope keeps your creations fixed in the room while you turn the camera away and back.
-- **Phone as camera, PC as screen.** The phone streams its camera live to the PC over a direct WebRTC link. The PC does the tracking and shows everything.
-- **Autosave** in the browser, with undo/redo, save/open `.json` files, and export to `.glb` for Blender, Unity and other 3D apps.
-- **Free 3D view** lets you orbit around your creations with the mouse or touch.
-- **Mouse or touch as a hand** for when there's no camera. Scroll to change depth, and click-drag to stretch shapes.
+- **Hand, face, body and object tracking** with Google's MediaPipe models. Tracking runs in a background worker, so the 3D view stays smooth.
+- **☝️ Point to draw** in 3D: index finger straight, other fingers folded. Move your hand closer to or further from the camera to draw in depth.
+- **🤏 Pinch to grab** anything and move it anywhere. **Twist your wrist** to turn it. Pinch with both hands to scale and rotate it.
+- **🤏🤏 Pinch both hands and pull apart** to mark a glowing white **drawing area**. Point at the area to draw on it. The shape picker has other shapes too: slime, hatched bar, box, sphere, cylinder, cone and ring.
+- **Hands-free control.** Pinch over any button to press it. Hold an open palm up for a second to open a ring menu around your hand. The app remembers your camera setup and starts by itself, and the phone reconnects to the PC on its own.
+- **🍎 Gravity:** things fall, bounce, pile up and land on drawing areas. Let go while moving to throw. **Slime** squishes, wobbles and splats.
+- **📌 Stick:** draw on (or drop things onto) your face, your hands, your body, or a recognized object such as a cup, phone, bottle or book. It sticks and moves with it. Grab it to pull it off.
+- **😋 Eat** things: bring them to your mouth, open wide, then close. Three bites and they're gone.
+- **Paint and Erase** modes. Hold a fist to undo, and hold ✌️ for the next shape.
+- **Phone as camera, PC as screen** over a direct WebRTC link. On a phone, *Lock objects to the room* uses the gyroscope.
+- **Autosave**, undo/redo, save/open `.json`, and export `.glb` for Blender and Unity.
+- **Mouse or touch as a hand** when there's no camera.
+- **Android app (APK)**, built with `npm run apk`.
 
 ## Use it
 
@@ -35,12 +36,15 @@ Both devices must be able to open the app over **HTTPS**, for example from the G
 
 | Gesture | Does |
 |---|---|
-| ☝️ Point with your index finger | Draw (touch an object to draw on it) |
-| 🤏 Pinch an object | Grab it and move it |
+| ☝️ Point with your index finger | Draw (touch an object or area to draw on it) |
+| 🤏 Pinch an object | Grab and move it; twist your wrist to turn it |
 | Pinch an object with both hands | Scale and rotate it |
-| 🤏🤏 Pinch both hands in empty space and pull apart | Stretch a new shape |
+| 🤏🤏 Pinch both hands in empty space and pull apart | Mark a drawing area (or the chosen shape) |
+| 🤏 Pinch over a button | Press it |
+| ✋ Hold an open palm up | Open the ring menu |
 | Hold a fist ✊ | Undo |
 | Hold a peace sign ✌️ | Next shape |
+| Bring something to your mouth, open, close | Eat it (3 bites) |
 
 Mouse/touch (menu → "Mouse/touch acts as a hand"): drag to draw, drag an object to move it, Shift-drag or right-drag for a shape, Alt-drag to draw on an object, scroll for depth.
 
@@ -71,8 +75,12 @@ Pushing to `main` deploys to GitHub Pages through `.github/workflows/deploy.yml`
 
 | File | Role |
 |---|---|
-| `src/tracker.js` | MediaPipe hand / face / pose landmarkers |
-| `src/hands.js` | Pinch / point detection, distance from camera (from palm size), smoothing (One Euro filter), gestures |
+| `src/tracker*.js` | MediaPipe hand / face / body / object models, run in a Web Worker |
+| `src/hands.js` | Pinch / point detection, distance from camera (from palm size), wrist rotation, smoothing (One Euro filter), gestures |
+| `src/airui.js` | Hands-free buttons and the palm ring menu |
+| `src/anchors.js` | Face / hand / body / object anchors for sticking things to real things |
+| `src/physics.js` | Gravity, throwing, collisions, slime squash-and-stretch |
+| `src/eat.js` | Eating, using the mouth landmarks |
 | `src/world.js` | three.js scene; the camera feed is the background and bloom makes the neon glow |
 | `src/objects.js` | Holographic shapes, glowing strokes, save format |
 | `src/tools.js` | Create (point = draw, pinch = move, two-hand pinch = shape), paint, erase |

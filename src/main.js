@@ -11,6 +11,11 @@ import { Store } from './store.js';
 import { Tools, TOOLS } from './tools.js';
 import { Overlay } from './overlay.js';
 import { SHAPES } from './objects.js';
+import { AirUI } from './airui.js';
+import { Anchors } from './anchors.js';
+import { Eater } from './eat.js';
+import { Physics } from './physics.js';
+import { splat } from './sfx.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -18,26 +23,33 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 const COLORS = ['#4fd1c5', '#f472b6', '#facc15', '#a78bfa', '#60a5fa', '#fb923c', '#4ade80', '#ffffff'];
 const HOLD_TIME = 0.8; // seconds to hold a fist / peace sign
 const TOOL_NAMES = { create: 'Create', paint: 'Paint', erase: 'Erase' };
-const SHAPE_NAMES = { bar: 'Bar', box: 'Box', sphere: 'Sphere', cylinder: 'Cylinder', cone: 'Cone', torus: 'Ring' };
+const SHAPE_NAMES = { board: 'Area', slime: 'Slime', bar: 'Bar', box: 'Box', sphere: 'Sphere', cylinder: 'Cylinder', cone: 'Cone', torus: 'Ring' };
+const SHAPE_ICONS = { board: '⬜', slime: '🟢', bar: '▭', box: '◻︎', sphere: '◯', cylinder: '⌭', cone: '△', torus: '◎' };
 // Settings that are remembered between visits.
-const PERSIST = ['tool', 'shape', 'color', 'size', 'showSkeleton', 'face', 'pose', 'fov', 'glow'];
+const PERSIST = ['tool', 'shape', 'color', 'size', 'showSkeleton', 'face', 'pose', 'fov', 'glow',
+  'eat', 'wristRotate', 'physics', 'stick'];
+const SETTINGS_VERSION = 2;
 
 // ------------------------------------------------------------------ settings
 
 const settings = {
-  tool: 'create', shape: 'bar', color: COLORS[0], size: 8,
+  tool: 'create', shape: 'board', color: COLORS[0], size: 8,
   showSkeleton: true, face: false, pose: false, glow: true, fov: 62,
+  eat: true, wristRotate: true, physics: false, stick: false,
   mirror: true, motion: false, freeView: false, pointerHand: false,
 };
 try {
   const saved = JSON.parse(localStorage.getItem('handspace.settings') || '{}');
   for (const k of PERSIST) if (k in saved) settings[k] = saved[k];
   if (!TOOLS.includes(settings.tool)) settings.tool = 'create'; // older versions had more tools
+  if ((saved.v ?? 1) < 2) settings.shape = 'board'; // two-hand pinch now makes a drawing area by default
 } catch { /* ignore */ }
 
 function saveSettings() {
   try {
-    localStorage.setItem('handspace.settings', JSON.stringify(Object.fromEntries(PERSIST.map((k) => [k, settings[k]]))));
+    localStorage.setItem('handspace.settings', JSON.stringify({
+      v: SETTINGS_VERSION, ...Object.fromEntries(PERSIST.map((k) => [k, settings[k]])),
+    }));
   } catch { /* ignore */ }
 }
 
@@ -49,7 +61,17 @@ const world = new World($('#three'), video);
 const fx = new Effects(world.scene);
 const store = new Store(world.content);
 store.load();
-const tools = new Tools({ world, fx, store, settings });
+const anchors = new Anchors({ world });
+const tools = new Tools({ world, fx, store, settings, anchors, onStick: (label) => toast(`📌 Stuck to ${label}`) });
+const physics = new Physics({
+  world,
+  onSettled: () => store.commit(),
+  onSplat: (o, speed) => {
+    splat(speed);
+    fx.emit(o.position, o.userData.data.color, 14, 0.3, 0.6);
+  },
+});
+const eater = new Eater({ world, fx, store, tools, onBite: (msg) => toast(msg) });
 const overlay = new Overlay($('#overlay'));
 const handInput = new HandInput();
 const tracker = new Tracker();
@@ -69,6 +91,8 @@ const remote = { facing: 'user', q: new Quaternion(), baseInv: new Quaternion(),
 // Expose for debugging and automated tests.
 window.handspace = {
   settings, world, store, tools, handInput, tracker, remote,
+  get airUI() { return airUI; },
+  anchors, physics, eater,
   get sender() { return sender; },
   get senderMotion() { return senderMotion; },
 };
@@ -96,6 +120,9 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && wakeLock) keepAwake();
 });
 
+// Face tracking feeds the face mesh, eating, and sticking things to your face.
+const needsFace = () => settings.face || settings.eat || settings.stick;
+
 async function startTracker() {
   if (trackerStarted) return;
   trackerStarted = true;
@@ -103,8 +130,9 @@ async function startTracker() {
   try {
     await tracker.init();
     trackerReady = true;
-    if (settings.face) tracker.enable('face');
+    if (needsFace()) tracker.enable('face');
     if (settings.pose) tracker.enable('pose');
+    if (settings.stick) tracker.enable('objects');
   } catch (err) {
     console.error(err);
     toast('Hand tracking failed to load — using mouse/touch instead');
@@ -113,6 +141,23 @@ async function startTracker() {
 }
 
 // ------------------------------------------------------------------ layout
+
+// Lowers the render resolution when the frame rate drops, and raises it again
+// when there's room.
+const quality = { scale: 1, slow: 0, fast: 0 };
+function adaptQuality(dt) {
+  if (dt <= 0 || document.hidden) return;
+  if (dt > 1 / 40) { quality.slow += dt; quality.fast = 0; } else if (dt < 1 / 55) { quality.fast += dt; quality.slow = 0; }
+  if (quality.slow > 1.5 && quality.scale > 0.5) {
+    quality.scale = Math.max(0.5, quality.scale * 0.8);
+    quality.slow = 0;
+    layout();
+  } else if (quality.fast > 6 && quality.scale < 1) {
+    quality.scale = Math.min(1, quality.scale * 1.15);
+    quality.fast = 0;
+    layout();
+  }
+}
 
 let layoutKey = '';
 function layout() {
@@ -130,7 +175,7 @@ function layout() {
   h = Math.round(h);
   stage.style.width = `${w}px`;
   stage.style.height = `${h}px`;
-  const pr = Math.min(devicePixelRatio, 2, Math.sqrt(4e6 / (w * h)));
+  const pr = Math.min(devicePixelRatio, 2, Math.sqrt(4e6 / (w * h))) * quality.scale;
   world.resize(w, h, pr);
   overlay.resize(w, h, pr);
   layoutKey = `${W}x${H}@${vw}x${vh}`;
@@ -139,8 +184,19 @@ addEventListener('resize', layout);
 
 // ------------------------------------------------------------------ camera sources
 
+function remember(key, value) {
+  try {
+    if (value == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch { /* ignore */ }
+}
+function recall(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
 async function useLocalCamera() {
   source = 'local';
+  remember('handspace.source', 'local');
   receiver?.destroy();
   receiver = null;
   $('#pair').classList.add('hidden');
@@ -163,6 +219,7 @@ async function useLocalCamera() {
 
 function useRemoteCamera() {
   source = 'remote';
+  remember('handspace.source', 'receive');
   stopStream(stream);
   stream = null;
   video.srcObject = null;
@@ -170,6 +227,7 @@ function useRemoteCamera() {
   $('#pair').classList.remove('hidden');
   $('#pair-status').textContent = 'Connecting to pairing server…';
   receiver = new Receiver({
+    code: recall('handspace.pairCode'), // same code every time, so the phone can reconnect by itself
     onStream: async (s) => {
       video.srcObject = s;
       await videoReady(video);
@@ -191,6 +249,7 @@ function useRemoteCamera() {
 }
 
 function showPairCode() {
+  remember('handspace.pairCode', receiver.code);
   $('#pair-code').textContent = receiver.code;
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
   $('#pair-status').textContent = local
@@ -250,11 +309,18 @@ async function setSetting(key, value) {
     stage.classList.toggle('free', value);
   }
   if (key === 'fov') $('#fov-val').textContent = `${value}°`;
-  if ((key === 'face' || key === 'pose') && value && trackerReady && !tracker[key]) {
-    toast(`Loading ${key === 'face' ? 'face' : 'body'} tracking…`);
-    tracker.enable(key).then(() => toast(`${key === 'face' ? 'Face' : 'Body'} tracking on`),
-      () => toast(`Couldn't load ${key} tracking`));
+  const model = { face: 'face', eat: 'face', pose: 'pose', stick: 'objects' }[key];
+  if (model && value && trackerReady && !tracker.has(model)) {
+    const name = { face: 'face tracking', pose: 'body tracking', objects: 'object recognition' }[model];
+    toast(`Loading ${name}…`);
+    tracker.enable(model).then(() => toast(`${name[0].toUpperCase()}${name.slice(1)} on`), () => toast(`Couldn't load ${name}`));
+    if (key === 'stick' && !tracker.has('face')) tracker.enable('face');
   }
+  if (key === 'physics') {
+    $('#physics-btn').classList.toggle('active', value);
+    if (value) physics.wakeAll();
+  }
+  if (key === 'stick') $('#stick-btn').classList.toggle('active', value);
   if (key === 'motion' && value) {
     if (source === 'remote') {
       remote.needsRecenter = true;
@@ -348,7 +414,14 @@ function buildToolbar() {
   $('#clear').onclick = () => {
     if (store.count && confirm('Delete everything? (You can still undo.)')) { tools.cancel(); store.clear(); toast('Cleared'); }
   };
-  $('#home').onclick = () => { location.href = location.pathname; };
+  $('#home').onclick = () => {
+    remember('handspace.source', null);
+    location.href = location.pathname;
+  };
+  $('#physics-btn').onclick = () => setSetting('physics', !settings.physics);
+  $('#stick-btn').onclick = () => setSetting('stick', !settings.stick);
+  $('#physics-btn').classList.toggle('active', settings.physics);
+  $('#stick-btn').classList.toggle('active', settings.stick);
   $('#pair-cancel').onclick = () => { facing = 'user'; useLocalCamera(); };
 
   setTool(settings.tool);
@@ -440,6 +513,38 @@ function virtualHands(view) {
   return [{ u, v, depth, pinching: pointer.mode === 'pinch', pointing: pointer.mode === 'point' }];
 }
 
+// ------------------------------------------------------------------ hands-free menu
+
+function nextShape() {
+  const next = SHAPES[(SHAPES.indexOf(settings.shape) + 1) % SHAPES.length];
+  setTool('create');
+  setShape(next);
+  toast(`Shape: ${SHAPE_NAMES[next]}`);
+}
+
+function nextColor() {
+  setColor(COLORS[(COLORS.indexOf(settings.color) + 1) % COLORS.length]);
+}
+
+const airUI = new AirUI({
+  stage,
+  menu: $('#palm-menu'),
+  items: [
+    { id: 'create', icon: '✋', label: 'Create', run: () => setTool('create'), active: () => settings.tool === 'create' },
+    { id: 'paint', icon: '🎨', label: 'Paint', run: () => setTool('paint'), active: () => settings.tool === 'paint' },
+    { id: 'erase', icon: '🧽', label: 'Erase', run: () => setTool('erase'), active: () => settings.tool === 'erase' },
+    { id: 'shape', icon: () => SHAPE_ICONS[settings.shape], label: () => SHAPE_NAMES[settings.shape], run: nextShape, keep: true },
+    { id: 'color', icon: () => `<i class="dot" style="background:${settings.color}"></i>`, label: 'Color', run: nextColor, keep: true },
+    { id: 'physics', icon: '🍎', label: 'Gravity', run: () => setSetting('physics', !settings.physics), active: () => settings.physics, keep: true },
+    { id: 'stick', icon: '📌', label: 'Stick', run: () => setSetting('stick', !settings.stick), active: () => settings.stick, keep: true },
+    { id: 'undo', icon: '↶', label: 'Undo', run: undo, keep: true },
+    { id: 'redo', icon: '↷', label: 'Redo', run: redo, keep: true },
+    { id: 'view', icon: '🧊', label: '3D view', run: () => setSetting('freeView', !settings.freeView), active: () => settings.freeView },
+    { id: 'settings', icon: '⚙️', label: 'Settings', run: () => $('#menu').classList.remove('hidden') },
+    { id: 'close', icon: '✕', label: 'Close', run: () => {} },
+  ],
+});
+
 // ------------------------------------------------------------------ hold gestures
 
 function holdGestures() {
@@ -462,6 +567,7 @@ let last = performance.now();
 let fpsFrames = 0;
 let fpsTime = 0;
 let hudTime = 0;
+let lastTrackT = 0;
 
 function loop(now) {
   requestAnimationFrame(loop);
@@ -479,12 +585,16 @@ function loop(now) {
   const view = { W, H, f, mirror: settings.mirror };
 
   let updated = false;
+  let fresh = null;
   if (trackerReady) {
-    const r = tracker.detect(video, { face: settings.face, pose: settings.pose });
-    if (r) {
-      lastResult = r;
+    fresh = tracker.detect(video, { face: needsFace(), pose: settings.pose, objects: settings.stick });
+    if (fresh) {
+      lastResult = fresh;
       fpsFrames++;
-      if (!settings.pointerHand) { handInput.update(r.hands, view, world.camera, t); updated = true; }
+      if (!settings.pointerHand) {
+        handInput.update(fresh.hands, view, world.camera, t, fresh.face?.lm);
+        updated = true;
+      }
     }
   }
   if (settings.pointerHand && !settings.freeView) {
@@ -492,9 +602,21 @@ function loop(now) {
     updated = true;
   }
   if (updated) {
+    const trackDt = lastTrackT ? Math.min(t - lastTrackT, 0.2) : 0;
+    lastTrackT = t;
+    if (!settings.pointerHand) airUI.update(handInput.hands, trackDt);
     holdGestures();
     tools.update(handInput.hands);
   }
+  if (fresh) {
+    if (settings.stick) anchors.update(fresh, handInput.hands, view, world.camera, t);
+    if (settings.eat) eater.update(fresh.face, view);
+  }
+  anchors.apply();
+  const held = tools.busy();
+  for (const o of world.content.children) if (o.userData.data?.anchor) held.add(o);
+  physics.track(dt, held, settings.physics);
+  if (settings.physics) physics.update(dt, held, view);
 
   fx.update(dt, t, handInput.hands, settings.color, tools.radius, world.camera);
   overlay.draw({
@@ -504,10 +626,14 @@ function loop(now) {
     mirror: settings.mirror,
     showSkeleton: settings.showSkeleton,
     color: settings.color,
-    holdTime: HOLD_TIME,
+    holdTimes: { fist: HOLD_TIME, peace: HOLD_TIME, open: airUI.holdTime },
+    menuOpen: airUI.open,
+    mouth: settings.eat && !settings.freeView ? eater.state : null,
+    anchors: settings.stick && !settings.freeView ? anchors.visible() : null,
     t,
   });
   world.render(dt);
+  adaptQuality(dt);
 
   fpsTime += dt;
   if (fpsTime > 1) { $('#fps').textContent = trackerReady ? `${Math.round(fpsFrames / fpsTime)} fps tracking` : ''; fpsFrames = 0; fpsTime = 0; }
@@ -524,7 +650,9 @@ function updateHud() {
       ? 'Drag to draw · drag an object to move it · Shift-drag for a shape · Alt-drag to draw on objects · scroll = depth'
       : `${TOOL_NAMES[settings.tool]} · click or drag over objects`;
   } else if (!hands.length) status = 'Show your hands to the camera';
-  else if (settings.tool === 'create') status = '☝️ point to draw · 🤏 pinch an object to move it · 🤏🤏 pinch both hands and pull apart for a shape';
+  else if (settings.tool === 'create') {
+    status = `☝️ point to draw · 🤏 pinch to grab (twist to turn) · 🤏🤏 pull apart for ${settings.shape === 'board' ? 'an area' : `a ${SHAPE_NAMES[settings.shape].toLowerCase()}`} · ✋ hold palm for menu`;
+  }
   else status = `${TOOL_NAMES[settings.tool]} · pinch or point at objects`;
   if (tools.hint && (trackerReady || settings.pointerHand)) status = tools.hint[0].toUpperCase() + tools.hint.slice(1);
   const detail = [];
@@ -535,6 +663,12 @@ function updateHud() {
     const face = lastResult?.face;
     detail.push(face ? `Face: ${describeFace(face.blend).join(', ') || 'neutral'}` : 'Face: not found');
   }
+  if (settings.stick) {
+    const seen = anchors.visible().filter((a) => !['face', 'hand', 'body'].includes(a.label)).map((a) => a.label);
+    detail.push(seen.length ? `Seeing: ${[...new Set(seen)].join(', ')}` : 'Seeing: no objects');
+  }
+  if (settings.physics) detail.push('Gravity on');
+  if (tracker.mode === 'main') detail.push('tracking on main thread');
   if (settings.pose) detail.push(lastResult?.pose ? 'Body: tracked' : 'Body: not found');
   detail.push(`${store.count} object${store.count === 1 ? '' : 's'}`);
   $('#hud-status').textContent = status;
@@ -546,14 +680,17 @@ function updateHud() {
 let senderFacing = 'user';
 let senderStream = null;
 let oriTimer = null;
+let senderRetry = null;
 const senderMotion = new MotionSource();
 const _q = new Quaternion();
 
-async function openSender(code = '') {
+async function openSender(code = '', autoConnect = false) {
   show('sender');
+  remember('handspace.source', 'send');
   $('#sender-code').value = normalizeCode(code);
   keepAwake();
   await restartSenderCamera();
+  if (autoConnect && normalizeCode(code).length === 6) senderConnect();
 }
 
 async function restartSenderCamera() {
@@ -574,6 +711,7 @@ async function restartSenderCamera() {
 async function senderConnect() {
   const code = normalizeCode($('#sender-code').value);
   if (code.length !== 6) { $('#sender-status').textContent = 'Enter the 6-character code shown on your PC.'; return; }
+  remember('handspace.sendCode', code);
   if (!senderStream) await restartSenderCamera();
   if (!senderStream) return;
   let motionNote = '';
@@ -591,6 +729,12 @@ async function senderConnect() {
       }[status];
       $('#sender-status').textContent = text;
       if (status === 'connected') sender.send({ t: 'cam', facing: senderFacing });
+      // Keep trying until the PC is there (e.g. the phone was opened first).
+      if (status === 'error' || status === 'lost') {
+        clearTimeout(senderRetry);
+        senderRetry = setTimeout(() => { if (!$('#sender').classList.contains('hidden')) senderConnect(); }, 4000);
+        $('#sender-status').textContent += ' · retrying…';
+      }
     },
     onMessage: (msg) => {
       if (msg?.t === 'flip') { senderFacing = senderFacing === 'user' ? 'environment' : 'user'; restartSenderCamera(); }
@@ -614,11 +758,13 @@ $('#dim').onclick = () => $('#dim').classList.add('hidden');
 $('#sender-flip').onclick = () => { senderFacing = senderFacing === 'user' ? 'environment' : 'user'; restartSenderCamera(); };
 $('#sender-back').onclick = () => {
   clearInterval(oriTimer);
+  clearTimeout(senderRetry);
   sender?.destroy();
   sender = null;
   stopStream(senderStream);
   senderStream = null;
   history.replaceState(null, '', location.pathname);
+  remember('handspace.source', null);
   show('start');
 };
 
@@ -644,7 +790,11 @@ for (const b of $$('[data-start]')) {
 buildToolbar();
 requestAnimationFrame(loop);
 
+// Start straight away with whatever camera setup was used last time, so the
+// app needs no clicks (the browser asks for camera permission only once).
 const params = new URLSearchParams(location.search);
-if (params.get('join')) openSender(params.get('join'));
-else if (params.get('mode') === 'local') { enterApp(); useLocalCamera(); }
-else if (params.get('mode') === 'receive') { enterApp(); useRemoteCamera(); }
+const lastSource = recall('handspace.source');
+if (params.get('join')) openSender(params.get('join'), true);
+else if (params.get('mode') === 'local' || (!params.get('mode') && lastSource === 'local')) { enterApp(); useLocalCamera(); }
+else if (params.get('mode') === 'receive' || (!params.get('mode') && lastSource === 'receive')) { enterApp(); useRemoteCamera(); }
+else if (lastSource === 'send') openSender(recall('handspace.sendCode') ?? '', true);

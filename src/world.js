@@ -57,7 +57,7 @@ export class World {
     this.bloomComposer.addPass(this.bloomRender);
     this.bloomComposer.addPass(this.bloom);
 
-    this.composer = new EffectComposer(this.renderer, new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples: 4 }));
+    this.composer = new EffectComposer(this.renderer, new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples: 2 }));
     this.renderPass = new RenderPass(this.scene, this.camera);
     const mix = new ShaderPass(new ShaderMaterial({
       uniforms: { baseTexture: { value: null }, bloomTexture: { value: this.bloomComposer.renderTarget2.texture } },
@@ -100,10 +100,11 @@ export class World {
   resize(w, h, pr) {
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h, false);
-    for (const c of [this.composer, this.bloomComposer]) {
-      c.setPixelRatio(pr);
-      c.setSize(w, h);
-    }
+    this.composer.setPixelRatio(pr);
+    this.composer.setSize(w, h);
+    // The glow is a blur, so half resolution looks the same and costs a quarter.
+    this.bloomComposer.setPixelRatio(pr * 0.5);
+    this.bloomComposer.setSize(w, h);
     this.freeCam.aspect = w / h;
     this.freeCam.updateProjectionMatrix();
     setLineResolution(w * pr, h * pr);
@@ -145,7 +146,12 @@ export class World {
     this.scene.background = this.black;
     this.scene.fog = null;
     this.grid.visible = false;
+    const hidden = [];
+    this.content.traverse((o) => {
+      if (o.userData.noGlow && o.visible) { o.visible = false; hidden.push(o); }
+    });
     this.bloomComposer.render(dt);
+    for (const o of hidden) o.visible = true;
     this.scene.background = background;
     this.scene.fog = fog;
     this.grid.visible = this.free;

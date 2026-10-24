@@ -1,0 +1,10 @@
+{
+  "name": "HandSpace",
+  "short_name": "HandSpace",
+  "description": "Draw and build in 3D with your hands.",
+  "start_url": "./",
+  "display": "fullscreen",
+  "background_color": "#07090d",
+  "theme_color": "#07090d",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "handspace",
+  "version": "0.1.0",
+  "description": "Sculpt and draw in 3D space with your hands, using any camera.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "copy-wasm": "node scripts/copy-wasm.mjs",
+    "dev": "npm run copy-wasm && vite --host",
+    "build": "npm run copy-wasm && vite build",
+    "preview": "vite preview --host",
+    "test": "node scripts/test-hands.mjs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.1.1",
+    "peerjs": "^1.5.5",
+    "qrcode": "^1.5.4",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "vite": "^8.3.5"
+  }
+}

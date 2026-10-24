@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#111317" />
+  <title>HandSpace</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Space+Grotesk:wght@400;500;600&display=swap" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <!-- Start screen: choose where the camera comes from -->
+  <section id="start" class="screen">
+    <div class="start-card">
+      <h1><span class="logo">✋</span><span class="title">HandSpace</span></h1>
+      <p class="lead">Pinch and pull in the air to draw and build 3D objects. Your camera tracks your hands, face and body.</p>
+      <div class="choices">
+        <button class="choice" data-start="local">
+          <strong>Use this device's camera</strong>
+          <span>Webcam on a PC, or the front/back camera of a phone or tablet.</span>
+        </button>
+        <button class="choice" data-start="receive">
+          <strong>Use my phone as the camera</strong>
+          <span>Open on your PC. It shows a code and QR code to pair a phone.</span>
+        </button>
+        <button class="choice" data-start="send">
+          <strong>Send this camera to another screen</strong>
+          <span>Open on your phone. Enter the code shown on your PC.</span>
+        </button>
+      </div>
+      <p class="hint">Everything runs in your browser. Video goes straight between your own devices and is never uploaded.</p>
+    </div>
+  </section>
+
+  <!-- Sender screen (phone streaming its camera to a PC) -->
+  <section id="sender" class="screen hidden">
+    <video id="sender-video" autoplay playsinline muted></video>
+    <div class="sender-panel">
+      <h2>Phone camera</h2>
+      <p class="status">This phone becomes the camera. Your PC does the tracking and shows everything.</p>
+      <label>Pairing code
+        <input id="sender-code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC123" />
+      </label>
+      <div class="row">
+        <button id="sender-connect" class="primary">Connect</button>
+        <button id="sender-flip">Flip camera</button>
+        <button id="sender-dim" title="Black out this screen to save battery; tap to wake">Dim screen</button>
+      </div>
+      <label class="check"><input type="checkbox" id="sender-motion" checked /> Send phone motion (keeps objects in place when you turn the phone)</label>
+      <p id="sender-status" class="status">Not connected</p>
+      <button id="sender-back" class="link">← Back</button>
+    </div>
+  </section>
+
+  <div id="dim" class="hidden"><span>Streaming camera · tap to wake</span></div>
+
+  <!-- Main app -->
+  <section id="app" class="screen hidden">
+    <div id="stage">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="three"></canvas>
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <div id="hud">
+      <div id="hud-status">Loading models…</div>
+      <div id="hud-detail"></div>
+    </div>
+    <div id="hud-right"><span id="fps"></span></div>
+    <div id="toast" class="hidden"></div>
+
+    <!-- Pairing panel shown on the PC while waiting for a phone -->
+    <div id="pair" class="panel hidden">
+      <h2>Pair your phone</h2>
+      <p>On your phone, scan this QR code, or open this page and choose <em>Send this camera to another screen</em>.</p>
+      <canvas id="pair-qr"></canvas>
+      <div class="code" id="pair-code">······</div>
+      <p id="pair-status" class="status">Waiting for phone…</p>
+      <button id="pair-cancel" class="link">Use this device's camera instead</button>
+    </div>
+
+    <nav id="toolbar">
+      <div class="group" id="tools">
+        <button data-tool="draw" class="active" title="Draw (D)">✏️<span>Draw</span></button>
+        <button data-tool="shape" title="Shape (S)">🧊<span>Shape</span></button>
+        <button data-tool="grab" title="Grab / move / scale (G)">✊<span>Grab</span></button>
+        <button data-tool="paint" title="Paint an object (P)">🎨<span>Paint</span></button>
+        <button data-tool="erase" title="Erase (E)">🧽<span>Erase</span></button>
+      </div>
+      <div class="group" id="shapes">
+        <button data-shape="bar" class="active" title="Hatched bar">▭</button>
+        <button data-shape="box" title="Box">◻︎</button>
+        <button data-shape="sphere" title="Sphere">◯</button>
+        <button data-shape="cylinder" title="Cylinder">⌭</button>
+        <button data-shape="cone" title="Cone">△</button>
+        <button data-shape="torus" title="Ring">◎</button>
+      </div>
+      <div class="group" id="colors"></div>
+      <div class="group">
+        <input type="range" id="size" min="2" max="30" value="8" title="Brush / bar thickness" />
+      </div>
+      <div class="group">
+        <button id="undo" title="Undo (Z) — or hold a fist">↶</button>
+        <button id="redo" title="Redo (Y)">↷</button>
+        <button id="menu-btn" title="Menu">☰</button>
+      </div>
+    </nav>
+
+    <div id="menu" class="panel hidden">
+      <h2>Settings</h2>
+      <label class="check"><input type="checkbox" data-setting="showSkeleton" /> Show hand skeleton</label>
+      <label class="check"><input type="checkbox" data-setting="glow" /> Glow effects (turn off if slow)</label>
+      <label class="check"><input type="checkbox" data-setting="face" /> Track face (expressions)</label>
+      <label class="check"><input type="checkbox" data-setting="pose" /> Track body pose</label>
+      <label class="check"><input type="checkbox" data-setting="mirror" /> Mirror view</label>
+      <label class="check"><input type="checkbox" data-setting="motion" /> Lock objects to the room (uses phone motion)</label>
+      <label class="check"><input type="checkbox" data-setting="freeView" /> Free 3D view (orbit with mouse/touch)</label>
+      <label class="check"><input type="checkbox" data-setting="pointerHand" /> Mouse/touch acts as a hand</label>
+      <label>Camera field of view <span id="fov-val"></span>
+        <input type="range" data-setting="fov" min="40" max="100" step="1" />
+      </label>
+      <div class="row wrap">
+        <button id="recenter">Recenter view</button>
+        <button id="flip-cam">Flip camera</button>
+        <button id="export-json">Save file</button>
+        <button id="import-json">Open file</button>
+        <button id="export-glb">Export 3D model (.glb)</button>
+        <button id="clear" class="danger">Clear all</button>
+        <button id="home">Change camera source</button>
+      </div>
+      <details>
+        <summary>Gestures</summary>
+        <ul class="gestures">
+          <li><b>Pinch</b> (thumb + index) — draw, grab, paint or erase depending on the tool.</li>
+          <li><b>Draw on objects</b> — start a stroke on a shape and it sticks to its surface and moves with it.</li>
+          <li><b>Pinch with both hands and pull apart</b> — in Shape mode, stretches a new shape between your hands.</li>
+          <li><b>Grab with both hands</b> — scale and rotate an object.</li>
+          <li><b>Hold a fist</b> for a moment — undo.</li>
+          <li><b>Hold a peace sign ✌️</b> for a moment — switch to the next tool.</li>
+          <li>Move your hand closer to or further from the camera to draw in depth.</li>
+        </ul>
+      </details>
+      <button id="menu-close" class="primary">Done</button>
+      <input type="file" id="file-input" accept=".json,application/json" hidden />
+    </div>
+  </section>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

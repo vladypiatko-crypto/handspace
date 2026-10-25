@@ -19,6 +19,8 @@ function modelUrls() {
   };
 }
 
+const SLOW_MS = 28; // main-thread tracking slower than this per frame stutters the picture
+
 export const HAND_CONNECTIONS = HandLandmarker.HAND_CONNECTIONS;
 export const FACE_CONTOURS = FaceLandmarker.FACE_LANDMARKS_CONTOURS;
 export const POSE_CONNECTIONS = PoseLandmarker.POSE_CONNECTIONS;
@@ -37,6 +39,10 @@ export class Tracker {
     this.pending = null;
     this.busySince = 0;
     this.lastTime = -1;
+    this.cost = 0; // average time one main-thread tracking run blocks the page (ms)
+    this.runs = 0;
+    this.autoTried = false;
+    this.resultTimes = []; // when recent results arrived, for results/second
   }
 
   // Picks the fastest setup. GPU on the main thread is what MediaPipe is built
@@ -47,7 +53,10 @@ export class Tracker {
   async init() {
     const wasmBase = new URL('mediapipe/wasm', document.baseURI).href;
     const models = modelUrls();
+    this.wasmBase = wasmBase;
+    this.models = models;
     const force = new URLSearchParams(location.search).get('tracker');
+    if (force) this.autoTried = true;
 
     if (force !== 'worker') {
       const core = new TrackerCore();
@@ -108,10 +117,57 @@ export class Tracker {
     });
   }
 
+  counted() {
+    const now = performance.now();
+    this.resultTimes.push(now);
+    while (this.resultTimes.length && now - this.resultTimes[0] > 3000) this.resultTimes.shift();
+  }
+
+  // Tracking results per second over the last few seconds.
+  rate() {
+    const now = performance.now();
+    return this.resultTimes.filter((t) => now - t < 3000).length / 3;
+  }
+
+  // Trial run of the background worker: switch to it for a few seconds and
+  // keep it only if it delivers at least ~70% as many results. It never
+  // blocks the page, so at a similar rate the picture is much smoother.
+  async tryWorker() {
+    this.autoTried = true;
+    const mainRate = this.rate();
+    const mainDelegate = this.delegate;
+    try {
+      const delegate = await this.startWorker(this.wasmBase, this.models);
+      for (const kind of this.loaded) if (kind !== 'hand') this.worker.postMessage({ type: 'enable', kind });
+      this.mode = 'worker';
+      this.delegate = delegate;
+      this.resultTimes = [];
+      setTimeout(() => {
+        const workerRate = this.rate();
+        console.info(`tracking: main thread ${mainRate.toFixed(1)}/s (${this.cost.toFixed(0)} ms each), worker ${workerRate.toFixed(1)}/s`);
+        if (workerRate < mainRate * 0.7) {
+          this.worker.terminate();
+          this.worker = null;
+          this.mode = 'main';
+          this.delegate = mainDelegate;
+        } else {
+          this.core.close();
+          this.core = null;
+        }
+      }, 4000);
+    } catch (err) {
+      console.warn('Background tracking trial failed', err);
+      this.worker?.terminate();
+      this.worker = null;
+      this.mode = 'main';
+    }
+  }
+
   onMessage(msg) {
     if (msg.type === 'result') {
       this.pending = msg.result;
       this.busySince = 0;
+      this.counted();
     } else if (msg.type === 'enabled') {
       this.loaded.add(msg.kind);
       this.waiters[msg.kind]?.resolve();
@@ -145,7 +201,15 @@ export class Tracker {
     if (this.mode === 'main') {
       if (video.currentTime === this.lastTime) return null;
       this.lastTime = video.currentTime;
-      return this.core.run(video, performance.now(), opts);
+      const t0 = performance.now();
+      const r = this.core.run(video, t0, opts);
+      const ms = performance.now() - t0;
+      this.cost = this.runs++ ? this.cost * 0.9 + ms * 0.1 : ms;
+      this.counted();
+      // Tracking is holding up every frame (slow phone GPU)? See whether the
+      // background worker does better.
+      if (!this.autoTried && this.runs > 60 && this.cost > SLOW_MS) this.tryWorker();
+      return r;
     }
     const now = performance.now();
     if (this.busySince && now - this.busySince > 2000) this.busySince = 0; // lost frame: move on

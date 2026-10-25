@@ -26,6 +26,12 @@ export const lineMaterials = new Set();
 const lineResolution = { x: 1, y: 1 };
 const HIGHLIGHT = new Color('#ff5a36');
 
+// Lite materials (battery saver): no clear coat, which is costly on phone GPUs.
+let lite = false;
+export function setLiteMaterials(on) {
+  lite = on;
+}
+
 export function setLineResolution(w, h) {
   lineResolution.x = w;
   lineResolution.y = h;
@@ -39,6 +45,7 @@ function strokeMaterial(color) {
 }
 
 function clayMaterial(color) {
+  if (lite) return new MeshStandardMaterial({ color, roughness: 0.5, metalness: 0 });
   return new MeshPhysicalMaterial({ color, roughness: 0.55, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.45 });
 }
 
@@ -49,10 +56,12 @@ function paperMaterial() {
 // Glossy jelly whose surface wobbles; physics sets userData.wobble (0..1)
 // when it's shaken or lands.
 function slimeMaterial(color) {
-  const m = new MeshPhysicalMaterial({
-    color, roughness: 0.12, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.06,
-    transparent: true, opacity: 0.9,
-  });
+  const m = lite
+    ? new MeshStandardMaterial({ color, roughness: 0.15, metalness: 0, transparent: true, opacity: 0.9 })
+    : new MeshPhysicalMaterial({
+      color, roughness: 0.12, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.06,
+      transparent: true, opacity: 0.9,
+    });
   const wobble = { value: 0 };
   m.userData.wobble = wobble;
   m.onBeforeCompile = (shader) => {

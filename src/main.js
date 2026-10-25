@@ -10,7 +10,7 @@ import { Effects } from './fx.js';
 import { Store } from './store.js';
 import { Tools, TOOLS } from './tools.js';
 import { Overlay } from './overlay.js';
-import { SHAPES } from './objects.js';
+import { SHAPES, setLiteMaterials } from './objects.js';
 import { AirUI } from './airui.js';
 import { Anchors } from './anchors.js';
 import { Eater } from './eat.js';
@@ -64,6 +64,7 @@ const stage = $('#stage');
 const world = new World($('#three'), video, { antialias: !settings.saver });
 const fx = new Effects(world.scene);
 const store = new Store(world.content);
+setLiteMaterials(settings.saver);
 store.load();
 const anchors = new Anchors({ world });
 const tools = new Tools({ world, fx, store, settings, anchors, onStick: (label) => toast(`Stuck to ${label}`) });
@@ -333,6 +334,8 @@ async function setSetting(key, value) {
   if (key === 'stick') $('#stick-btn').classList.toggle('active', value);
   if (key === 'saver') {
     world.setSaver(value);
+    setLiteMaterials(value);
+    store.restore(store.current); // rebuild with the matching materials
     layout();
     if (source === 'local' && stream) useLocalCamera(); // reopen at the new camera size
   }
@@ -594,7 +597,7 @@ function holdGestures() {
 
 let last = performance.now();
 let fpsFrames = 0;
-let fpsTime = 0;
+let fpsStart = 0; // real time (ms) the current readout period began
 let drawFrames = 0;
 let hudTime = 0;
 let lastTrackT = 0;
@@ -605,9 +608,9 @@ let lastActive = 0;
 addEventListener('pointermove', () => { lastActive = performance.now(); }, { passive: true });
 addEventListener('pointerdown', () => { lastActive = performance.now(); }, { passive: true });
 function frameInterval(now) {
-  const idle = now - lastActive > 3000 && !physics.awake;
-  if (settings.saver) return idle ? 100 : 33;
-  return idle ? 50 : 0;
+  const idle = now - lastActive > 6000 && !physics.awake;
+  if (settings.saver) return idle ? 66 : 33;
+  return idle ? 33 : 0;
 }
 
 const appScreen = $('#app');
@@ -634,7 +637,7 @@ function loop(now) {
   if (trackerReady) {
     // Face: every 2nd frame when you want to see it, every 4th when it's only
     // needed for eating/sticking, otherwise off.
-    const face = settings.face ? 2 : needsFace() ? 4 : 0;
+    const face = settings.face ? 2 : needsFace() ? (settings.saver ? 6 : 4) : 0;
     fresh = tracker.detect(video, { face, pose: settings.pose, objects: settings.stick });
     if (fresh) {
       lastResult = fresh;
@@ -685,15 +688,18 @@ function loop(now) {
   world.render(dt);
   adaptQuality(dt, frameInterval(now) / 1000);
 
-  fpsTime += dt;
+  // Readout over real elapsed time (dt is capped, so it would flatter slow frames).
   drawFrames++;
-  if (fpsTime > 1) {
-    $('#fps').textContent = trackerReady
-      ? `${Math.round(drawFrames / fpsTime)} fps · hands ${Math.round(fpsFrames / fpsTime)}/s (${tracker.delegate ?? '?'})`
-      : '';
+  const span = (now - fpsStart) / 1000;
+  if (span > 1) {
+    if (fpsStart) {
+      $('#fps').textContent = trackerReady
+        ? `${Math.round(drawFrames / span)} fps · hands ${Math.round(fpsFrames / span)}/s (${tracker.delegate ?? '?'}${tracker.mode === 'worker' ? ', background' : ''})`
+        : '';
+    }
     fpsFrames = 0;
     drawFrames = 0;
-    fpsTime = 0;
+    fpsStart = now;
   }
   hudTime += dt;
   if (hudTime > 0.15) { hudTime = 0; updateHud(); }

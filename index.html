@@ -106,8 +106,9 @@
     <div id="stage">
       <video id="video" autoplay playsinline muted></video>
       <canvas id="three"></canvas>
-      <canvas id="overlay"></canvas>
     </div>
+    <!-- Hand marks are drawn above every menu, so you can see where you point. -->
+    <canvas id="overlay"></canvas>
 
     <div id="hud">
       <div id="hud-status">Loading…</div>
@@ -130,35 +131,41 @@
 
     <nav id="toolbar">
       <div class="group seg" id="tools">
-        <button data-tool="create" class="active" title="Create (C): point to draw, pinch to grab, pinch both hands for an area" data-icon="create"><span>Create</span></button>
-        <button data-tool="paint" title="Paint (P): point at or pinch an object to recolor it" data-icon="paint"><span>Paint</span></button>
-        <button data-tool="erase" title="Erase (E): point or pinch and sweep over things" data-icon="erase"><span>Erase</span></button>
-      </div>
-      <div class="group" id="shapes">
-        <button data-shape="board" class="active" title="Drawing area" data-icon="board"></button>
-        <button data-shape="slime" title="Slime" data-icon="slime"></button>
-        <button data-shape="bar" title="Hatched bar" data-icon="bar"></button>
-        <button data-shape="box" title="Box" data-icon="box"></button>
-        <button data-shape="sphere" title="Sphere" data-icon="sphere"></button>
-        <button data-shape="cylinder" title="Cylinder" data-icon="cylinder"></button>
-        <button data-shape="cone" title="Cone" data-icon="cone"></button>
-        <button data-shape="torus" title="Ring" data-icon="torus"></button>
-      </div>
-      <div class="group" id="colors"></div>
-      <div class="group">
-        <input type="range" id="size" min="2" max="30" value="8" title="Line and shape thickness" />
+        <button data-tool="create" class="active" title="Create (C): point to draw, pinch to grab, pinch both hands for an area" data-icon="create" data-icon-size="18"><span>Create</span></button>
+        <button data-tool="paint" title="Paint (P): a white canvas to paint on; tap-pinch something to fill it" data-icon="paint" data-icon-size="18"><span>Paint</span></button>
+        <button data-tool="erase" title="Erase (E): point or pinch and sweep over things" data-icon="erase" data-icon-size="18"><span>Erase</span></button>
       </div>
       <div class="group">
-        <button id="physics-btn" class="toggle" title="Gravity: things fall, bounce and can be thrown" data-icon="gravity"><span>Gravity</span></button>
-        <button id="stick-btn" class="toggle" title="Stick things to your face, hands and real objects" data-icon="stick"><span>Stick</span></button>
+        <button id="shape-btn" class="picker" title="Shape for two-hand pinch"></button>
+        <button id="color-btn" class="picker" title="Color and thickness"><i class="dot"></i></button>
       </div>
       <div class="group">
-        <button id="undo" title="Undo (Z), or hold a fist" data-icon="undo"></button>
-        <button id="redo" title="Redo (Y)" data-icon="redo"></button>
-        <button id="fullscreen-btn" title="Full screen: just the camera and your work" data-icon="maximize"></button>
-        <button id="menu-btn" title="Settings (M)" data-icon="menu"></button>
+        <button id="physics-btn" class="toggle" title="Gravity: things fall, bounce and can be thrown" data-icon="gravity" data-icon-size="18"><span>Gravity</span></button>
+        <button id="stick-btn" class="toggle" title="Stick things to your face, hands and real objects" data-icon="stick" data-icon-size="18"><span>Stick</span></button>
+      </div>
+      <div class="group">
+        <button id="undo" title="Undo (Z), or hold a fist" data-icon="undo" data-icon-size="18"></button>
+        <button id="redo" title="Redo (Y)" data-icon="redo" data-icon-size="18"></button>
+        <button id="fullscreen-btn" title="Full screen: just the camera and your work" data-icon="maximize" data-icon-size="18"></button>
+        <button id="menu-btn" title="Settings (M)" data-icon="menu" data-icon-size="18"></button>
       </div>
     </nav>
+
+    <!-- Pop-up pickers above the toolbar -->
+    <div id="shape-pop" class="pop hidden">
+      <button data-shape="board" title="Canvas" data-icon="board" data-icon-size="18"><span>Canvas</span></button>
+      <button data-shape="slime" title="Slime" data-icon="slime" data-icon-size="18"><span>Slime</span></button>
+      <button data-shape="bar" title="Bar" data-icon="bar" data-icon-size="18"><span>Bar</span></button>
+      <button data-shape="box" title="Box" data-icon="box" data-icon-size="18"><span>Box</span></button>
+      <button data-shape="sphere" title="Sphere" data-icon="sphere" data-icon-size="18"><span>Sphere</span></button>
+      <button data-shape="cylinder" title="Cylinder" data-icon="cylinder" data-icon-size="18"><span>Cylinder</span></button>
+      <button data-shape="cone" title="Cone" data-icon="cone" data-icon-size="18"><span>Cone</span></button>
+      <button data-shape="torus" title="Ring" data-icon="torus" data-icon-size="18"><span>Ring</span></button>
+    </div>
+    <div id="color-pop" class="pop hidden">
+      <div id="colors"></div>
+      <label class="size-row"><span>Thickness</span><input type="range" id="size" min="2" max="30" value="8" /></label>
+    </div>
 
     <div id="menu" class="card wide hidden">
       <div class="sheet-head">
@@ -206,6 +213,7 @@
           <li><b>Pinch both hands in empty space and pull apart</b> to make a drawing area (or the shape picked in the toolbar). Point at it to draw on it.</li>
           <li><b>Or frame it:</b> make an L with thumb and index on both hands, like framing a photo, and hold still for a moment.</li>
           <li><b>Hold an open palm up</b> for a second to open the menu around your hand, then pinch an item. Pinching any button on screen presses it.</li>
+          <li><b>Paint mode:</b> a blank white canvas appears in front of you. Point at it from anywhere to paint on it. A quick pinch on something fills it with the current color.</li>
           <li><b>Hold a fist</b> to undo. <b>Hold a peace sign</b> for the next shape.</li>
           <li><b>Gravity:</b> let go while moving to throw. Slime squishes and splats.</li>
           <li><b>Stick:</b> draw on or drop things onto your face, hand or a recognized object, and they move with it. Grab to pull off.</li>

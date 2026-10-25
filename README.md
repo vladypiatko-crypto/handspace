@@ -16,7 +16,9 @@ It runs entirely in the browser on PCs, phones and tablets, with nothing to inst
 - **🍎 Gravity:** things fall, bounce, pile up and land on drawing areas. Let go while moving to throw. **Slime** squishes, wobbles and splats.
 - **📌 Stick:** draw on (or drop things onto) your face, your hands, your body, or a recognized object such as a cup, phone, bottle or book. It sticks and moves with it. Grab it to pull it off.
 - **😋 Eat** things: bring them to your mouth, open wide, then close. Three bites and they're gone.
-- **Paint and Erase** modes. Hold a fist to undo, and hold ✌️ for the next shape.
+- **Paint mode:** a blank white canvas appears in front of you. Point at any canvas, from any distance, to paint on it. A quick pinch fills something with the color.
+- **Rotate while creating:** shapes stretched between two pinches follow your hands, and twisting your wrists tilts them.
+- **Erase** mode. Hold a fist to undo, and hold ✌️ for the next shape.
 - **Phone as camera, PC as screen** over a direct WebRTC link. On a phone, *Lock objects to the room* uses the gyroscope.
 - **Autosave**, undo/redo, save/open `.json`, and export `.glb` for Blender and Unity.
 - **Mouse or touch as a hand** when there's no camera.

@@ -7,7 +7,19 @@ import { buildObject, disposeObject, finishStroke, ownerOf, serialize, setHighli
 //   🤏 pinch an object  → grab and move it; pinch it with both hands to scale/rotate
 //   🤏🤏 pinch both hands in empty space and pull apart → new shape
 //   two "L" hands (thumb + index, like framing a photo), held still → new area
+// "paint" works the same, except pointing paints flat onto white canvases
+// (from any distance) instead of drawing in the air, and a quick pinch on
+// something fills it with the current color.
 export const TOOLS = ['create', 'paint', 'erase'];
+
+// How far quaternion q turns around `axis` (radians, signed): the "twist"
+// part of a swing-twist split.
+function twistAbout(q, axis) {
+  const s = q.w < 0 ? -1 : 1;
+  const proj = (q.x * axis.x + q.y * axis.y + q.z * axis.z) * s;
+  const angle = 2 * Math.atan2(proj, q.w * s);
+  return angle > Math.PI ? angle - 2 * Math.PI : angle;
+}
 
 const _n = new Vector3();
 const _nm = new Matrix3();
@@ -51,21 +63,24 @@ export class Tools {
     this.lastT = now;
     const tool = this.settings.tool;
     const hover = [];
-    if (tool === 'create') {
-      this._draw(hands);
-      this._pinch(hands);
+    if (tool === 'create' || tool === 'paint') {
+      const paint = tool === 'paint';
+      this._draw(hands, paint);
+      this._pinch(hands, paint);
       this._frame(hands, dt);
       hands.forEach((h, i) => {
         const held = this.grabs[i]?.target;
         if (held) hover.push(held);
         else if (h.present && !h.drawing && !h.pinching && h.gesture !== 'frame') {
           const o = this.pick(h.world, false, true);
-          if (o) { hover.push(o); this.hint ||= 'pinch to grab'; }
+          if (o) { hover.push(o); this.hint ||= paint ? 'tap-pinch to fill with color, pinch and move to grab' : 'pinch to grab'; }
         }
       });
+      if (paint && !this.strokes.some(Boolean) && hands.some((h) => h.gesture === 'point')) {
+        this.hint ||= 'point at a white canvas to paint on it';
+      }
     } else {
-      if (tool === 'paint') this._paint(hands);
-      else this._erase(hands);
+      this._erase(hands);
       for (const h of hands) {
         const o = h.present && this.pick(h.cursorWorld, true);
         if (o) hover.push(o);
@@ -117,30 +132,64 @@ export class Tools {
   // ------------------------------------------------------------ draw (point)
 
   // Where on a shape's surface the fingertip is drawing, if it's touching one.
-  _surfaceHit(at, only) {
+  // canvas: painting mode, which only paints on white canvases but reaches
+  // them from any distance (like pointing a laser at them).
+  _surfaceHit(at, only, canvas = false) {
     const ray = this.world.rayTo(at);
     const dist = at.distanceTo(ray.ray.origin);
     const list = only
       ? this.world.pickables(only, (o) => o === only)
-      : this.world.pickables(this.world.content, (o) => o.userData.data.type === 'shape');
+      : this.world.pickables(this.world.content, (o) => o.userData.data.type === 'shape'
+        && (!canvas || o.userData.data.shape === 'board'));
     const hit = ray.intersectObjects(list, false)[0];
     // The fingertip must be at (or reaching through) the surface, not hovering well in front.
     if (!hit) return null;
     const owner = ownerOf(hit.object);
     // Drawing areas are forgiving about depth; other shapes need a closer touch.
     const slack = owner.userData.data.shape === 'board' ? 0.3 : 0.1;
-    if (!only && dist < hit.distance - slack) return null;
+    if (!only && !canvas && dist < hit.distance - slack) return null;
     _nm.getNormalMatrix(hit.object.matrixWorld);
     _n.copy(hit.face.normal).applyMatrix3(_nm).normalize();
     if (_n.dot(ray.ray.direction) > 0) _n.negate();
-    return { owner, point: hit.point.clone().addScaledVector(_n, this.radius * 0.6) };
+    // Paint lies almost flat on a canvas; strokes on other things sit on top.
+    const lift = owner.userData.data.shape === 'board' ? 0.25 : 0.6;
+    return { owner, point: hit.point.clone().addScaledVector(_n, this.radius * lift) };
   }
 
-  _draw(hands) {
+  // Painting mode: makes sure there's a blank canvas in view to paint on.
+  ensureCanvas() {
+    const cam = this.world.camera;
+    cam.updateMatrixWorld();
+    const inView = this.world.content.children.some((o) => {
+      if (o.userData.data?.shape !== 'board') return false;
+      const p = o.getWorldPosition(new Vector3()).project(cam);
+      return Math.abs(p.x) < 0.9 && Math.abs(p.y) < 0.9 && p.z < 1;
+    });
+    if (inView) return false;
+    // Fill most of the view at about arm's length, facing you.
+    const depth = 0.45;
+    const halfH = depth * Math.tan((cam.fov * Math.PI) / 360);
+    const w = Math.min(halfH * cam.aspect * 2 * 0.72, 0.6);
+    const h = Math.min(halfH * 2 * 0.62, w * 1.2);
+    const center = new Vector3(0, halfH * 0.08, -depth).applyMatrix4(cam.matrixWorld);
+    const corner = (sx, sy) => new Vector3(sx * w / 2, halfH * 0.08 + sy * h / 2, -depth).applyMatrix4(cam.matrixWorld);
+    const data = shapeFromHands('board', corner(-1, 1), corner(1, -1), cam.quaternion, this.thickness, '#ffffff', { corners: true });
+    const canvas = buildObject(data);
+    this.world.content.add(canvas);
+    this.fx.popIn(canvas);
+    this.fx.ripple(center, '#ffffff', cam, 0.25);
+    pop();
+    this.store.commit();
+    return true;
+  }
+
+  // paint: only paint on canvases (see _surfaceHit), never in the air.
+  _draw(hands, paint = false) {
     hands.forEach((h, i) => {
       let s = this.strokes[i];
       if (h.drawStarted && !h.captured && !this.grabs[i]) {
-        const surf = this._surfaceHit(h.tipWorld);
+        const surf = this._surfaceHit(h.tipWorld, null, paint);
+        if (paint && !surf) return;
         const parent = surf ? surf.owner : this.world.content;
         const scale = surf ? parent.getWorldScale(new Vector3()).x : 1;
         const p = surf ? surf.point : h.tipWorld.clone();
@@ -162,7 +211,7 @@ export class Tools {
         let p = h.tipWorld;
         if (s.surface) {
           // Drawing on an object: stick to its surface, skip points that slide off it.
-          const surf = this._surfaceHit(h.tipWorld, s.surface);
+          const surf = this._surfaceHit(h.tipWorld, s.surface, paint);
           if (!surf) return;
           p = surf.point;
         }
@@ -172,7 +221,7 @@ export class Tools {
           s.last.copy(p);
           this.fx.emit(p, this.settings.color, 2, 0.06, 0.5);
         }
-        this.hint = s.surface ? 'drawing on object' : 'drawing';
+        this.hint = paint ? 'painting' : s.surface ? 'drawing on object' : 'drawing';
       }
       if (h.drawEnded || !h.present) this._endStroke(i);
     });
@@ -195,7 +244,8 @@ export class Tools {
 
   // ------------------------------------------------------------ pinch: grab or make shapes
 
-  _pinch(hands) {
+  // paint: a quick pinch-and-release on something fills it with the color.
+  _pinch(hands, paint = false) {
     hands.forEach((h, i) => {
       if (h.started && !h.captured) {
         const other = this.grabs[1 - i];
@@ -218,11 +268,14 @@ export class Tools {
         this.empty[i] = false;
         const released = this.grabs[i]?.target;
         if (this.grabs[i]) {
+          this.tap = { ...this.grabs[i], end: h.world.clone() };
           this.grabs[i] = null;
           this.two = null;
           const o = this.grabs[1 - i];
           if (o) this.grabs[1 - i] = this._hold(o.target, hands[1 - i]); // back to one hand
-          else {
+          else if (paint && this._wasTap(released, h)) {
+            this._recolor(released);
+          } else {
             if (this.settings.stick) this._stick(released);
             this.store.commit();
           }
@@ -264,7 +317,19 @@ export class Tools {
 
   // Starts holding an object with one hand.
   _hold(target, h) {
-    return { target, offset: target.position.clone().sub(h.world), rot0: h.rot.clone(), q0: target.quaternion.clone() };
+    return {
+      target, offset: target.position.clone().sub(h.world), rot0: h.rot.clone(), q0: target.quaternion.clone(),
+      pos0: target.position.clone(), start: h.world.clone(), t0: performance.now(),
+    };
+  }
+
+  // A short pinch that barely moved: a tap. Puts the object back where it was.
+  _wasTap(obj, h) {
+    const g = this.tap;
+    if (!g || g.target !== obj || !g.start) return false;
+    const tap = performance.now() - g.t0 < 350 && g.start.distanceTo(g.end ?? h.world) < 0.02;
+    if (tap) { obj.position.copy(g.pos0); obj.quaternion.copy(g.q0); }
+    return tap;
   }
 
   // Stick mode: dropping something on a real thing sticks it there.
@@ -318,7 +383,7 @@ export class Tools {
     if (f?.done) { this.hint = 'area placed: relax your hands'; return; }
     const A = a.cornerWorld;
     const B = b.cornerWorld;
-    const data = shapeFromHands('board', A, B, this.world.camera.quaternion, this.thickness, '#ffffff');
+    const data = shapeFromHands('board', A, B, this.world.camera.quaternion, this.thickness, '#ffffff', { corners: true });
     if (f) { f.obj.removeFromParent(); disposeObject(f.obj); }
     const obj = buildObject(data);
     obj.userData.preview = true;
@@ -350,8 +415,13 @@ export class Tools {
     const [a, b] = hands;
     const both = this.empty[0] && this.empty[1] && a.pinching && b.pinching;
     if (both) {
+      // Twisting both wrists turns the new shape around the line between your hands.
+      if (!this.createRot0) this.createRot0 = [a.rot.clone(), b.rot.clone()];
+      const axis = b.world.clone().sub(a.world).normalize();
+      const twist = (twistAbout(a.rot.clone().multiply(this.createRot0[0].clone().invert()), axis)
+        + twistAbout(b.rot.clone().multiply(this.createRot0[1].clone().invert()), axis)) / 2;
       const data = shapeFromHands(this.settings.shape, a.world, b.world, this.world.camera.quaternion,
-        this.thickness, this.settings.color);
+        this.thickness, this.settings.color, { twist });
       if (this.preview) { this.preview.removeFromParent(); disposeObject(this.preview); }
       this.preview = buildObject(data);
       this.preview.userData.preview = true;
@@ -363,6 +433,7 @@ export class Tools {
       }
       return;
     }
+    this.createRot0 = null;
     if (this.preview) {
       const p = this.preview;
       this.preview = null;
@@ -386,14 +457,6 @@ export class Tools {
   }
 
   // ------------------------------------------------------------ paint / erase
-
-  _paint(hands) {
-    for (const h of hands) {
-      if ((!h.started && !h.drawStarted) || h.captured) continue;
-      const o = this.pick(h.started ? h.world : h.tipWorld, true);
-      if (o) this._recolor(o);
-    }
-  }
 
   _recolor(o) {
     const data = serialize(o);

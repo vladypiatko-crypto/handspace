@@ -185,6 +185,10 @@ function layout() {
   h = Math.round(h);
   stage.style.width = `${w}px`;
   stage.style.height = `${h}px`;
+  // The hand overlay sits outside the stage (above the menus) at the same spot.
+  Object.assign(overlay.canvas.style, {
+    left: `${Math.round((vw - w) / 2)}px`, top: `${Math.round((vh - h) / 2)}px`, width: `${w}px`, height: `${h}px`,
+  });
   // Battery saver keeps the 3D view near the screen's base resolution: phones
   // have 2-3x pixel density, and rendering all of it heats them up.
   const pr = Math.min(devicePixelRatio, settings.saver ? 1.25 : 2, Math.sqrt(4e6 / (w * h))) * quality.scale;
@@ -365,20 +369,32 @@ function setTool(tool) {
   if (tool === settings.tool) return;
   tools.cancel();
   settings.tool = tool;
+  // Painting: put a blank canvas in front of you if there isn't one in view.
+  if (tool === 'paint' && source && tools.ensureCanvas()) toast('Blank canvas ready: point at it to paint');
   for (const b of $$('[data-tool]')) b.classList.toggle('active', b.dataset.tool === tool);
-  $('#shapes').classList.toggle('hidden', tool !== 'create');
   saveSettings();
 }
 
 function setShape(shape) {
   settings.shape = shape;
   for (const b of $$('[data-shape]')) b.classList.toggle('active', b.dataset.shape === shape);
+  $('#shape-btn').innerHTML = icon(shape, 18);
   saveSettings();
+}
+
+// Pop-up pickers for shape and color: one open at a time.
+function togglePop(id, on = id ? $(`#${id}`).classList.contains('hidden') : false) {
+  for (const p of ['shape-pop', 'color-pop']) {
+    const open = p === id && on;
+    $(`#${p}`).classList.toggle('hidden', !open);
+    $(`#${p === 'shape-pop' ? 'shape-btn' : 'color-btn'}`).classList.toggle('open', open);
+  }
 }
 
 function setColor(color) {
   settings.color = color;
   for (const b of $$('.swatch')) b.classList.toggle('active', b.dataset.color === color);
+  $('#color-btn .dot').style.background = color;
   saveSettings();
 }
 
@@ -390,11 +406,17 @@ function buildToolbar() {
     b.dataset.color = c;
     b.style.background = c;
     b.title = c;
-    b.onclick = () => setColor(c);
+    b.onclick = () => { setColor(c); togglePop('color-pop', false); };
     colors.append(b);
   }
   for (const b of $$('[data-tool]')) b.onclick = () => setTool(b.dataset.tool);
-  for (const b of $$('[data-shape]')) b.onclick = () => setShape(b.dataset.shape);
+  for (const b of $$('[data-shape]')) b.onclick = () => { setShape(b.dataset.shape); togglePop('shape-pop', false); };
+  $('#shape-btn').onclick = () => togglePop('shape-pop');
+  $('#color-btn').onclick = () => togglePop('color-pop');
+  // Tapping anywhere else closes an open picker.
+  addEventListener('pointerdown', (e) => {
+    if (!e.target.closest('.pop, .picker')) togglePop(null);
+  });
   $('#size').value = settings.size;
   $('#size').oninput = (e) => { settings.size = +e.target.value; saveSettings(); };
   $('#undo').onclick = undo;
@@ -443,7 +465,6 @@ function buildToolbar() {
   $('#pair-cancel').onclick = () => { facing = 'user'; useLocalCamera(); };
 
   setTool(settings.tool);
-  $('#shapes').classList.toggle('hidden', settings.tool !== 'create');
   setShape(settings.shape);
   setColor(settings.color);
   world.setMirror(settings.mirror);
@@ -717,7 +738,8 @@ function updateHud() {
   else if (settings.tool === 'create') {
     status = `Point to draw · Pinch to grab · Pinch both hands and pull apart, or frame with two L's, for ${settings.shape === 'board' ? 'a canvas' : `a ${SHAPE_NAMES[settings.shape].toLowerCase()}`} · Palm up for menu`;
   }
-  else status = `${TOOL_NAMES[settings.tool]} · pinch or point at objects`;
+  else if (settings.tool === 'paint') status = 'Point at a white canvas to paint · Quick pinch to fill with color · Pinch both hands or frame for a new canvas';
+  else status = 'Erase · Point or pinch and sweep over things';
   if (tools.hint && (trackerReady || settings.pointerHand)) status = tools.hint[0].toUpperCase() + tools.hint.slice(1);
   const detail = [];
   for (const h of hands) {

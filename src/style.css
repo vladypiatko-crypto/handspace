@@ -234,21 +234,20 @@ summary { cursor: pointer; font-weight: 500; }
 #stage { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); overflow: hidden; background: #0d0d0f; }
 #stage > * { position: absolute; inset: 0; width: 100%; height: 100%; }
 #video { object-fit: fill; opacity: 0; }
-#stage.free #overlay { visibility: hidden; }
-#overlay { pointer-events: none; }
+#overlay { position: absolute; z-index: 6; pointer-events: none; }
 
 #hud, #hud-right, #toast, #toolbar, .card, #palm-menu { z-index: 2; }
 
 #hud {
   position: absolute; top: max(12px, env(safe-area-inset-top)); left: 12px;
-  background: rgba(255, 255, 255, 0.94); border-radius: 14px; padding: 8px 12px; box-shadow: var(--shadow);
-  font-size: 13px; pointer-events: none; max-width: min(560px, calc(100vw - 120px));
+  background: rgba(255, 255, 255, 0.92); border-radius: 12px; padding: 6px 10px; box-shadow: var(--shadow-sm);
+  font-size: 12px; line-height: 1.4; pointer-events: none; max-width: min(420px, calc(100vw - 110px));
 }
 #hud-status { font-weight: 500; display: flex; align-items: baseline; gap: 8px; }
 #hud-status::before {
   content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%; background: #2ec27e; transform: translateY(-1px);
 }
-#hud-detail { color: var(--muted); font-size: 12px; margin-top: 1px; }
+#hud-detail { color: var(--muted); font-size: 11px; margin-top: 1px; }
 #hud-detail:empty { display: none; }
 #hud-right {
   position: absolute; top: max(16px, env(safe-area-inset-top)); right: 14px;
@@ -266,41 +265,47 @@ summary { cursor: pointer; font-weight: 500; }
 /* ------------------------------------------------------------ toolbar */
 
 #toolbar {
-  position: absolute; left: 50%; transform: translateX(-50%); bottom: max(12px, env(safe-area-inset-bottom));
-  display: flex; align-items: center; gap: 6px; padding: 6px;
-  background: rgba(255, 255, 255, 0.96); border-radius: 18px; box-shadow: var(--shadow-lg);
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: max(10px, env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: 4px; padding: 4px;
+  background: rgba(255, 255, 255, 0.95); border-radius: 14px; box-shadow: var(--shadow);
   max-width: calc(100vw - 16px);
 }
-#toolbar .group { display: flex; align-items: center; gap: 2px; flex: none; }
-#toolbar .group + .group { padding-left: 6px; margin-left: 2px; border-left: 1px solid var(--line); }
-#toolbar button {
-  height: 40px; min-width: 40px; padding: 0 10px; border-radius: 12px; border: none; background: transparent;
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--ink-2);
+#toolbar .group { display: flex; align-items: center; gap: 1px; flex: none; }
+#toolbar .group + .group { padding-left: 4px; margin-left: 1px; border-left: 1px solid var(--line); }
+#toolbar button, .pop button {
+  height: 34px; min-width: 34px; padding: 0 8px; border-radius: 10px; border: none; background: transparent;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px; color: var(--ink-2);
   transition: background 0.15s, color 0.15s;
 }
-#toolbar button:hover { background: var(--surface-2); color: var(--ink); }
-#toolbar button span { font-size: 13.5px; font-weight: 500; }
+#toolbar button:hover, .pop button:hover { background: var(--surface-2); color: var(--ink); }
+#toolbar button span, .pop button span { font-size: 12.5px; font-weight: 500; }
 #toolbar button.active { background: var(--ink); color: #fff; }
-#toolbar #shapes button.active { background: var(--surface-2); color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink); }
-#toolbar button.toggle.active { background: var(--accent); color: var(--accent-ink); }
-#toolbar .swatch {
-  width: 26px; height: 26px; min-width: 26px; padding: 0; border-radius: 50%;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); transition: transform 0.15s;
-}
-#toolbar .swatch:hover { transform: scale(1.1); }
-#toolbar .swatch.active { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--ink); }
-#toolbar #colors { gap: 6px; padding-right: 2px; }
-#size { width: 72px; }
 #toolbar button.toggle span { display: none; } /* icon-only; the tooltip names them */
+#toolbar button.toggle.active { background: var(--accent); color: var(--accent-ink); }
+#toolbar button.picker.open { background: var(--surface-2); box-shadow: inset 0 0 0 1.5px var(--ink); }
+#toolbar .dot, .pop .swatch { display: block; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.14); }
+#toolbar .dot { width: 18px; height: 18px; }
 
-@media (max-width: 1100px) {
+/* Pickers that pop up above the toolbar */
+.pop {
+  position: absolute; z-index: 3; left: 50%; transform: translateX(-50%);
+  bottom: calc(max(10px, env(safe-area-inset-bottom)) + 50px);
+  background: rgba(255, 255, 255, 0.97); border-radius: 14px; box-shadow: var(--shadow-lg); padding: 6px;
+  display: grid; grid-template-columns: repeat(4, auto); gap: 2px; animation: toast-in 0.18s ease-out;
+}
+.pop button.active { background: var(--surface-2); box-shadow: inset 0 0 0 1.5px var(--ink); color: var(--ink); }
+#color-pop { grid-template-columns: 1fr; gap: 8px; padding: 10px; }
+#colors { display: flex; gap: 6px; }
+.pop .swatch { width: 28px; height: 28px; min-width: 28px; padding: 0; transition: transform 0.15s; }
+.pop .swatch:hover { transform: scale(1.1); background-color: inherit; }
+.pop .swatch.active { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--ink); }
+.size-row { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+.size-row input { flex: 1; }
+
+@media (max-width: 760px) {
   #toolbar button span { display: none; }
-  #toolbar { flex-wrap: wrap; justify-content: center; width: calc(100vw - 16px); gap: 4px 6px; }
-  #toolbar .group + .group { padding-left: 0; margin-left: 0; border-left: none; }
-  #toolbar button { min-width: 38px; height: 38px; padding: 0 8px; }
-  .card { top: 45%; max-height: calc(100vh - 190px); }
-  #toolbar #colors { gap: 4px; }
-  #toolbar .swatch { width: 24px; height: 24px; min-width: 24px; }
+  #toolbar button { min-width: 36px; padding: 0 6px; }
+  .pop button span { display: none; }
 }
 
 /* ------------------------------------------------------------ full screen */

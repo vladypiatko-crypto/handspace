@@ -49,8 +49,10 @@ function clayMaterial(color) {
   return new MeshPhysicalMaterial({ color, roughness: 0.55, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.45 });
 }
 
-function paperMaterial() {
-  return new MeshStandardMaterial({ color: '#fbfaf7', roughness: 0.95, metalness: 0, transparent: true, opacity: 0.95 });
+// White paper by default; a filled canvas takes the fill color.
+function paperMaterial(color = '#ffffff') {
+  const c = new Color(color).getHex() === 0xffffff ? '#fbfaf7' : color;
+  return new MeshStandardMaterial({ color: c, roughness: 0.95, metalness: 0, transparent: true, opacity: 0.95 });
 }
 
 // Glossy jelly whose surface wobbles; physics sets userData.wobble (0..1)
@@ -161,7 +163,7 @@ function buildShape(data) {
   g.add(inner);
   if (data.shape === 'board') {
     // A sheet of paper to draw on, with a hairline edge.
-    const body = lit(new Mesh(bodies.board(), paperMaterial()));
+    const body = lit(new Mesh(bodies.board(), paperMaterial(data.color)));
     body.castShadow = false;
     inner.add(body);
     return g;
@@ -249,9 +251,13 @@ const _b = new Vector3();
 
 // Shape spanned between two pinch points A and B. `camQ` is the camera rotation
 // (shapes face the viewer), `t` the thickness setting in meters.
-export function shapeFromHands(shape, A, B, camQ, t, color) {
+// options.twist: extra turn (radians) around the A→B line, from twisting wrists.
+// options.corners: for boards, A and B are opposite corners of an area facing
+// you (framing gesture) instead of the middles of its left and right edges.
+export function shapeFromHands(shape, A, B, camQ, t, color, { twist = 0, corners = false } = {}) {
   const d = _x.subVectors(B, A);
   const len = Math.max(d.length(), 0.005);
+  const axis = d.clone().normalize(); // (d is a scratch vector that alongAxis overwrites)
   const mid = new Vector3().addVectors(A, B).multiplyScalar(0.5);
   const q = new Quaternion();
   let dims;
@@ -276,8 +282,14 @@ export function shapeFromHands(shape, A, B, camQ, t, color) {
     q.setFromRotationMatrix(_m.makeBasis(_x, _y, _z));
   };
 
-  if (shape === 'board') {
-    // The two pinch points are opposite corners of the area, facing you.
+  if (shape === 'board' && !corners) {
+    // Held at the middles of its left and right edges, like a sheet of paper:
+    // it tilts and turns with your hands.
+    alongAxis('x');
+    dims = [len, Math.max(len * 0.68, 0.02), 0.004];
+    color = '#ffffff'; // canvases start blank
+  } else if (shape === 'board') {
+    // The two points are opposite corners of the area, facing you.
     q.copy(camQ);
     const inv = camQ.clone().invert();
     _a.copy(A).applyQuaternion(inv);
@@ -287,6 +299,7 @@ export function shapeFromHands(shape, A, B, camQ, t, color) {
     sx = Math.max(sx, sy * 0.4, 0.02);
     sy = Math.max(sy, sx * 0.4, 0.02);
     dims = [sx, sy, 0.004];
+    color = '#ffffff';
   } else if (shape === 'bar') {
     alongAxis('x');
     const h = Math.max(t * 2.2, len * 0.17);
@@ -297,20 +310,12 @@ export function shapeFromHands(shape, A, B, camQ, t, color) {
     const r = Math.max(t * 3, len * 0.32);
     dims = [r, len, r];
   } else {
-    q.copy(camQ);
-    if (shape === 'box') {
-      const inv = camQ.clone().invert();
-      _a.copy(A).applyQuaternion(inv);
-      _b.copy(B).applyQuaternion(inv);
-      const sx = Math.max(Math.abs(_a.x - _b.x), 0.01);
-      const sy = Math.max(Math.abs(_a.y - _b.y), 0.01);
-      const sz = Math.max(Math.abs(_a.z - _b.z), Math.min(sx, sy) * 0.8, 0.01);
-      dims = [sx, sy, sz];
-    } else {
-      dims = [len, len, len];
-    }
+    // Box, sphere, slime and ring follow the line between your hands too.
+    alongAxis('x');
+    dims = shape === 'box' ? [len, len * 0.7, len * 0.7] : [len, len, len];
   }
 
+  if (twist) q.premultiply(new Quaternion().setFromAxisAngle(axis, twist));
   _m.compose(mid, q, new Vector3(1, 1, 1));
   return {
     type: 'shape',

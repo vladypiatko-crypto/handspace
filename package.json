@@ -1,6 +1,6 @@
 {
   "name": "handspace",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Sculpt and draw in 3D space with your hands, using any camera.",
   "private": true,
   "type": "module",

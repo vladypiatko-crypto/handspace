@@ -39,20 +39,51 @@ export class Tracker {
     this.lastTime = -1;
   }
 
+  // Picks the fastest setup. GPU on the main thread is what MediaPipe is built
+  // for and runs in real time; feeding a worker frame by frame is far slower
+  // when the GPU is involved. Only without a GPU does the worker win, because
+  // CPU tracking there at least doesn't stall the 3D view.
+  // ?tracker=main or ?tracker=worker forces one (for testing).
   async init() {
     const wasmBase = new URL('mediapipe/wasm', document.baseURI).href;
     const models = modelUrls();
+    const force = new URLSearchParams(location.search).get('tracker');
+
+    if (force !== 'worker') {
+      const core = new TrackerCore();
+      try {
+        const delegate = await core.init(wasmBase, models);
+        if (delegate === 'GPU' || force === 'main') {
+          this.useMain(core, delegate);
+          return;
+        }
+        // CPU only: try the worker instead, keep this as a fallback.
+        this.fallback = { core, delegate };
+      } catch (err) {
+        console.warn('Main-thread tracking failed', err);
+      }
+    }
+
     try {
-      await this.startWorker(wasmBase, models);
+      this.delegate = await this.startWorker(wasmBase, models);
       this.mode = 'worker';
+      this.fallback?.core.close();
     } catch (err) {
-      console.warn('Tracking worker unavailable, tracking on the main thread', err);
+      console.warn('Tracking worker unavailable', err);
       this.worker?.terminate();
       this.worker = null;
-      this.core = new TrackerCore();
-      await this.core.init(wasmBase, models);
-      this.mode = 'main';
+      if (!this.fallback) throw err;
+      this.useMain(this.fallback.core, this.fallback.delegate);
+      return;
     }
+    this.loaded.add('hand');
+    this.ready = true;
+  }
+
+  useMain(core, delegate) {
+    this.core = core;
+    this.mode = 'main';
+    this.delegate = delegate;
     this.loaded.add('hand');
     this.ready = true;
   }
@@ -67,7 +98,7 @@ export class Tracker {
         if (data.type === 'ready') {
           clearTimeout(timer);
           w.onmessage = (ev) => this.onMessage(ev.data);
-          resolve();
+          resolve(data.delegate);
         } else if (data.type === 'error') {
           clearTimeout(timer);
           reject(new Error(data.message));
@@ -121,7 +152,13 @@ export class Tracker {
     if (!this.busySince && video.currentTime !== this.lastTime) {
       this.lastTime = video.currentTime;
       this.busySince = now;
-      createImageBitmap(video).then(
+      // The models work on small images anyway; a smaller frame is quicker to copy.
+      const scale = Math.min(1, 640 / video.videoWidth);
+      createImageBitmap(video, {
+        resizeWidth: Math.round(video.videoWidth * scale),
+        resizeHeight: Math.round(video.videoHeight * scale),
+        resizeQuality: 'low',
+      }).then(
         (bitmap) => this.worker.postMessage({ type: 'frame', bitmap, now: performance.now(), opts }, [bitmap]),
         () => { this.busySince = 0; },
       );

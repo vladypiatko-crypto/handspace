@@ -1,6 +1,6 @@
 import {
   Box3, Color, DirectionalLight, Fog, GridHelper, Group, HemisphereLight, Mesh, NeutralToneMapping,
-  PCFSoftShadowMap, PerspectiveCamera, PlaneGeometry, PMREMGenerator, Raycaster, RepeatWrapping, Scene,
+  PCFShadowMap, PerspectiveCamera, PlaneGeometry, PMREMGenerator, Raycaster, RepeatWrapping, Scene,
   ShadowMaterial, SRGBColorSpace, Vector3, VideoTexture, WebGLRenderer,
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -24,7 +24,7 @@ export class World {
     this.renderer.toneMapping = NeutralToneMapping;
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    this.renderer.shadowMap.type = PCFShadowMap;
 
     this.scene = new Scene();
     const pmrem = new PMREMGenerator(this.renderer);

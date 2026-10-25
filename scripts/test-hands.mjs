@@ -8,7 +8,7 @@ const camera = new PerspectiveCamera();
 camera.updateMatrixWorld();
 
 // Rough flat hand, meters, wrist at origin, fingers pointing up (-y in image).
-function makeHand({ pinch = false, fist = false, peace = false, point = false, reach = false } = {}) {
+function makeHand({ pinch = false, fist = false, peace = false, point = false, reach = false, frame = false } = {}) {
   const p = [];
   p[0] = [0, 0, 0];
   const fingers = { 1: -0.035, 5: -0.02, 9: 0, 13: 0.018, 17: 0.035 };
@@ -20,7 +20,9 @@ function makeHand({ pinch = false, fist = false, peace = false, point = false, r
   const curl = (b) => { p[b + 2] = [p[b][0], 0.07, 0.02]; p[b + 3] = [p[b][0], 0.05, 0.01]; };
   if (fist) [5, 9, 13, 17].forEach(curl);
   if (peace) [13, 17].forEach(curl);
-  if (point || reach) [9, 13, 17].forEach(curl);
+  if (point || reach || frame) [9, 13, 17].forEach(curl);
+  // "L" for framing: thumb straight out to the side.
+  if (frame) { p[1] = [-0.03, 0.02, 0]; p[2] = [-0.055, 0.035, 0]; p[3] = [-0.08, 0.04, 0]; p[4] = [-0.105, 0.045, 0]; }
   // About to pinch: index bent toward the thumb, thumb coming in.
   if (reach) { p[7] = [-0.03, 0.125, 0.02]; p[8] = [-0.04, 0.115, 0.035]; p[4] = [-0.06, 0.09, 0.02]; }
   if (pinch) { p[8] = [-0.03, 0.12, 0.01]; p[4] = [-0.035, 0.115, 0.012]; }
@@ -122,6 +124,21 @@ for (const d of [0.3, 0.5, 0.9]) {
   for (let i = 0; i < 20; i++) input.update([frame(twisted, 0.5)], view, camera, (t += 0.033));
   const angle = q0.angleTo(input.hands[0].rot);
   check('wrist twist is tracked', Math.abs(angle - 0.6) < 0.1, `${angle.toFixed(2)} rad`);
+}
+
+{
+  // An "L" (thumb out) frames instead of drawing; a normal point still draws.
+  const input = new HandInput();
+  let t = 0;
+  for (let i = 0; i < 8; i++) input.update([frame(makeHand({ frame: true }), 0.5)], view, camera, (t += 0.033));
+  check('L shape is a frame', input.hands[0].gesture === 'frame', input.hands[0].gesture);
+  check('framing never draws', !input.hands[0].drawing);
+  const c = input.hands[0].cornerScreen;
+  const mid = { x: (input.hands[0].lm[2].x + input.hands[0].lm[5].x) / 2 };
+  check('frame corner sits between thumb and index', Math.abs(c.x - mid.x) < 1e-6);
+  const p2 = new HandInput();
+  for (let i = 0; i < 8; i++) p2.update([frame(makeHand({ point: true }), 0.5)], view, camera, (t += 0.033));
+  check('normal point is still a point', p2.hands[0].gesture === 'point' && p2.hands[0].drawing, p2.hands[0].gesture);
 }
 
 {

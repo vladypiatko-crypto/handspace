@@ -126,6 +126,23 @@ export class Overlay {
         inkLine(g, 1.5, 0.75);
       }
 
+      // Framing ("L" with thumb and index): mark the corner and both arms.
+      if (hand.gesture === 'frame' && hand.lm) {
+        const cx = hand.cornerScreen.x * w;
+        const cy = hand.cornerScreen.y * h;
+        g.beginPath();
+        for (const tip of [4, 8]) {
+          g.moveTo(cx, cy);
+          g.lineTo(cx + (hx(hand.lm[tip]) - cx) * 0.75, cy + (hy(hand.lm[tip]) - cy) * 0.75);
+        }
+        inkLine(g, 3, 1);
+        g.fillStyle = '#fff';
+        g.beginPath();
+        g.arc(cx, cy, 4, 0, Math.PI * 2);
+        g.fill();
+        return;
+      }
+
       // Pointing: a pen tip in the current color at the fingertip.
       if (hand.drawing || hand.gesture === 'point') {
         const tx = hand.tipScreen.x * w;

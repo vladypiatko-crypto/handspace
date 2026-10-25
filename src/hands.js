@@ -33,14 +33,22 @@ const dist3 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 // Palm bones that barely bend, used to estimate how far the hand is.
 const PALM = [[0, 5], [0, 17], [5, 17], [0, 9]];
 const FINGERS = [[8, 6], [12, 10], [16, 14], [20, 18]]; // [tip, middle joint]
-const PINCH_ON = 0.32; // thumb–index gap as a fraction of palm length
-const PINCH_OFF = 0.5;
+const PINCH_ON = 0.38; // thumb–index gap as a fraction of palm length
+const PINCH_OFF = 0.6; // (hysteresis: once pinching, it takes a clear release to let go)
+const FRAME_ANGLE = 55; // thumb this far (degrees) from the index = an "L" for framing
 const GRACE_FRAMES = 8; // keep a hand alive briefly when tracking drops out (e.g. in front of the face)
 const POINT_ON_FRAMES = 4; // frames of clear pointing before drawing starts
 const POINT_OFF_FRAMES = 3; // frames of not pointing before drawing stops
 const AFTER_PINCH = 0.45; // seconds after a pinch during which pointing doesn't draw
 const POINT_THUMB_GAP = 0.7; // pointing needs the thumb clearly away from the index tip
 const POINT_STRAIGHT = 0.9; // and the index finger nearly straight
+
+// Angle (degrees) between the directions a→b and c→d.
+function angleDeg(wl, a, b, c, d) {
+  const u = new Vector3(wl[b].x - wl[a].x, wl[b].y - wl[a].y, wl[b].z - wl[a].z).normalize();
+  const v = new Vector3(wl[d].x - wl[c].x, wl[d].y - wl[c].y, wl[d].z - wl[c].z).normalize();
+  return (Math.acos(Math.min(1, Math.max(-1, u.dot(v)))) * 180) / Math.PI;
+}
 
 // How straight a finger is: 1 = perfectly straight.
 const straightness = (wl, a, b, c, d) =>
@@ -74,6 +82,8 @@ export class Hand {
     this.captured = false; // this pinch/point is pressing a UI button, not acting in 3D
     this.rot = new Quaternion(); // hand orientation in world space (for twisting objects)
     this.palmScreen = { x: 0.5, y: 0.5 };
+    this.cornerScreen = { x: 0.5, y: 0.5 }; // corner of an "L" (thumb + index) frame
+    this.cornerWorld = new Vector3();
     this.lm = null; // landmarks in screen space (0..1)
     this.depth = 0.5;
     this.label = '';
@@ -166,11 +176,19 @@ export class HandInput {
       // pinch) and the other three fingers folded.
       const pointing = ext[0] && tucked[1] && tucked[2] && tucked[3]
         && straightness(wl, 5, 6, 7, 8) > POINT_STRAIGHT && gap > POINT_THUMB_GAP;
+      // "L" shape for framing an area: index straight, thumb straight and
+      // sticking well out to the side, other fingers folded.
+      const thumbAngle = angleDeg(wl, 2, 4, 5, 8);
+      const framing = pointing && thumbAngle > FRAME_ANGLE && straightness(wl, 1, 2, 3, 4) > 0.85;
+      h.cornerScreen.x = (slm[2].x + slm[5].x) / 2;
+      h.cornerScreen.y = (slm[2].y + slm[5].y) / 2;
+      this.unproject(h.cornerScreen.x, h.cornerScreen.y, h.depth, view, h.cornerWorld).applyMatrix4(camera.matrixWorld);
       let g = 'hand';
       if (h.pinching) g = 'pinch';
       else if (curled.every(Boolean)) g = 'fist';
       else if (ext[0] && ext[1] && curled[2] && curled[3]) g = 'peace';
       else if (ext.every(Boolean)) g = 'open';
+      else if (framing) g = 'frame';
       else if (pointing) g = 'point';
       this._setGesture(h, g, dt);
       this._setDrawing(h, g === 'point' && t - h.pinchEndT > AFTER_PINCH);

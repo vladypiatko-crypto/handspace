@@ -149,9 +149,12 @@ async function startTracker() {
 // Lowers the render resolution when the frame rate drops, and raises it again
 // when there's room.
 const quality = { scale: 1, slow: 0, fast: 0 };
-function adaptQuality(dt) {
+// interval: the frame time we're aiming for (battery saver and idle mode
+// slow down on purpose; that isn't the device struggling).
+function adaptQuality(dt, interval) {
   if (dt <= 0 || document.hidden) return;
-  if (dt > 1 / 40) { quality.slow += dt; quality.fast = 0; } else if (dt < 1 / 55) { quality.fast += dt; quality.slow = 0; }
+  const target = Math.max(1 / 60, interval);
+  if (dt > target * 1.5) { quality.slow += dt; quality.fast = 0; } else if (dt < target * 1.1) { quality.fast += dt; quality.slow = 0; }
   if (quality.slow > 1.5 && quality.scale > 0.5) {
     quality.scale = Math.max(0.5, quality.scale * 0.8);
     quality.slow = 0;
@@ -161,6 +164,8 @@ function adaptQuality(dt) {
     quality.fast = 0;
     layout();
   }
+  // Struggling devices also drop shadows.
+  world.setSaver(settings.saver || quality.scale < 0.7);
 }
 
 let layoutKey = '';
@@ -426,6 +431,8 @@ function buildToolbar() {
     remember('handspace.source', null);
     location.href = location.pathname;
   };
+  $('#fullscreen-btn').onclick = () => setFullscreen(true);
+  $('#exit-full').onclick = () => setFullscreen(false);
   $('#physics-btn').onclick = () => setSetting('physics', !settings.physics);
   $('#stick-btn').onclick = () => setSetting('stick', !settings.stick);
   $('#physics-btn').classList.toggle('active', settings.physics);
@@ -439,6 +446,19 @@ function buildToolbar() {
   world.setMirror(settings.mirror);
   world.setSaver(settings.saver);
 }
+
+// Full screen: browser full screen (when allowed: it needs a real tap or
+// click) plus a clean view with the controls hidden.
+function setFullscreen(on) {
+  $('#app').classList.toggle('clean', on);
+  $('#exit-full').classList.toggle('hidden', !on);
+  if (on && !document.fullscreenElement) document.documentElement.requestFullscreen?.({ navigationUI: 'hide' })?.catch(() => {});
+  if (!on && document.fullscreenElement) document.exitFullscreen?.()?.catch(() => {});
+}
+document.addEventListener('fullscreenchange', () => {
+  // Leaving browser full screen (e.g. Esc) brings the controls back too.
+  if (!document.fullscreenElement && $('#app').classList.contains('clean')) setFullscreen(false);
+});
 
 function undo() {
   tools.cancel();
@@ -548,6 +568,7 @@ const airUI = new AirUI({
     { id: 'undo', icon: icon('undo', 22), label: 'Undo', run: undo, keep: true },
     { id: 'redo', icon: icon('redo', 22), label: 'Redo', run: redo, keep: true },
     { id: 'view', icon: icon('view', 22), label: '3D view', run: () => setSetting('freeView', !settings.freeView), active: () => settings.freeView },
+    { id: 'full', icon: () => icon($('#app').classList.contains('clean') ? 'minimize' : 'maximize', 22), label: 'Full screen', run: () => setFullscreen(!$('#app').classList.contains('clean')), active: () => $('#app').classList.contains('clean') },
     { id: 'settings', icon: icon('menu', 22), label: 'Settings', run: () => $('#menu').classList.remove('hidden') },
     { id: 'close', icon: icon('close', 22), label: 'Close', run: () => {} },
   ],
@@ -574,6 +595,7 @@ function holdGestures() {
 let last = performance.now();
 let fpsFrames = 0;
 let fpsTime = 0;
+let drawFrames = 0;
 let hudTime = 0;
 let lastTrackT = 0;
 
@@ -610,7 +632,10 @@ function loop(now) {
   let updated = false;
   let fresh = null;
   if (trackerReady) {
-    fresh = tracker.detect(video, { face: needsFace(), pose: settings.pose, objects: settings.stick });
+    // Face: every 2nd frame when you want to see it, every 4th when it's only
+    // needed for eating/sticking, otherwise off.
+    const face = settings.face ? 2 : needsFace() ? 4 : 0;
+    fresh = tracker.detect(video, { face, pose: settings.pose, objects: settings.stick });
     if (fresh) {
       lastResult = fresh;
       fpsFrames++;
@@ -658,10 +683,18 @@ function loop(now) {
     t,
   });
   world.render(dt);
-  adaptQuality(dt);
+  adaptQuality(dt, frameInterval(now) / 1000);
 
   fpsTime += dt;
-  if (fpsTime > 1) { $('#fps').textContent = trackerReady ? `${Math.round(fpsFrames / fpsTime)} fps tracking` : ''; fpsFrames = 0; fpsTime = 0; }
+  drawFrames++;
+  if (fpsTime > 1) {
+    $('#fps').textContent = trackerReady
+      ? `${Math.round(drawFrames / fpsTime)} fps · hands ${Math.round(fpsFrames / fpsTime)}/s (${tracker.delegate ?? '?'})`
+      : '';
+    fpsFrames = 0;
+    drawFrames = 0;
+    fpsTime = 0;
+  }
   hudTime += dt;
   if (hudTime > 0.15) { hudTime = 0; updateHud(); }
 }
@@ -676,7 +709,7 @@ function updateHud() {
       : `${TOOL_NAMES[settings.tool]} · click or drag over objects`;
   } else if (!hands.length) status = 'Show your hands to the camera';
   else if (settings.tool === 'create') {
-    status = `Point to draw · Pinch to grab · Pull apart with both hands for ${settings.shape === 'board' ? 'a canvas' : `a ${SHAPE_NAMES[settings.shape].toLowerCase()}`} · Palm up for menu`;
+    status = `Point to draw · Pinch to grab · Pinch both hands and pull apart, or frame with two L's, for ${settings.shape === 'board' ? 'a canvas' : `a ${SHAPE_NAMES[settings.shape].toLowerCase()}`} · Palm up for menu`;
   }
   else status = `${TOOL_NAMES[settings.tool]} · pinch or point at objects`;
   if (tools.hint && (trackerReady || settings.pointerHand)) status = tools.hint[0].toUpperCase() + tools.hint.slice(1);

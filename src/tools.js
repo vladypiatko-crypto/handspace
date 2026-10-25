@@ -1,10 +1,12 @@
 import { Box3, Matrix3, Quaternion, Vector3 } from 'three';
+import { pop } from './sfx.js';
 import { buildObject, disposeObject, finishStroke, ownerOf, serialize, setHighlight, setStrokePoints, shapeFromHands } from './objects.js';
 
 // Modes. "create" needs no switching:
 //   ☝️ point            → draw (touch an object while pointing to draw on it)
 //   🤏 pinch an object  → grab and move it; pinch it with both hands to scale/rotate
 //   🤏🤏 pinch both hands in empty space and pull apart → new shape
+//   two "L" hands (thumb + index, like framing a photo), held still → new area
 export const TOOLS = ['create', 'paint', 'erase'];
 
 const _n = new Vector3();
@@ -18,6 +20,8 @@ export class Tools {
     this.preview = null;
     this.grabs = [null, null];
     this.empty = [false, false]; // hand is pinching empty space (shape candidate)
+    this.frame = null; // two-hand "L" frame being held: { obj, held, last, done }
+    this.lastT = performance.now();
     this.two = null;
     this.erased = false;
     this.highlighted = new Set();
@@ -31,6 +35,8 @@ export class Tools {
   cancel() {
     this.strokes.forEach((s, i) => s && this._endStroke(i));
     if (this.preview) { this.preview.removeFromParent(); disposeObject(this.preview); this.preview = null; }
+    if (this.frame && !this.frame.done) { this.frame.obj.removeFromParent(); disposeObject(this.frame.obj); }
+    this.frame = null;
     if (this.grabs.some(Boolean)) this.store.commit();
     this.grabs = [null, null];
     this.empty = [false, false];
@@ -40,16 +46,20 @@ export class Tools {
 
   update(hands) {
     this.hint = '';
+    const now = performance.now();
+    const dt = Math.min((now - this.lastT) / 1000, 0.2);
+    this.lastT = now;
     const tool = this.settings.tool;
     const hover = [];
     if (tool === 'create') {
       this._draw(hands);
       this._pinch(hands);
+      this._frame(hands, dt);
       hands.forEach((h, i) => {
         const held = this.grabs[i]?.target;
         if (held) hover.push(held);
-        else if (h.present && !h.drawing && !h.pinching) {
-          const o = this.pick(h.world, false);
+        else if (h.present && !h.drawing && !h.pinching && h.gesture !== 'frame') {
+          const o = this.pick(h.world, false, true);
           if (o) { hover.push(o); this.hint ||= 'pinch to grab'; }
         }
       });
@@ -74,11 +84,15 @@ export class Tools {
   // The object at a world point: anything along the ray from the camera
   // through the point that isn't far behind it, or failing that, anything
   // within a few centimeters of it.
-  pick(at, children = true) {
+  // near: for grabbing, the hand must also be at about the object's depth
+  // (so pinching in front of something far away starts a new shape instead).
+  pick(at, children = true, near = false) {
     const ray = this.world.rayTo(at);
     const dist = at.distanceTo(ray.ray.origin);
     const hits = ray.intersectObjects(this.world.pickables(), false);
-    const hit = hits.find((x) => x.distance < dist + 0.25);
+    const hit = near
+      ? hits.find((x) => x.distance > dist - 0.12 && x.distance < dist + 0.15)
+      : hits.find((x) => x.distance < dist + 0.25);
     let o = hit ? ownerOf(hit.object) : null;
     if (!o) {
       let best = 0.035;
@@ -190,7 +204,7 @@ export class Tools {
           this.grabs[i] = { target: other.target };
           this._startTwo(hands, other.target);
         } else {
-          const target = this.pick(h.world, false);
+          const target = this.pick(h.world, false, true);
           if (target) {
             if (target.userData.data.anchor) this.anchors?.detach(target); // pull it off
             this.grabs[i] = this._hold(target, h);
@@ -265,6 +279,7 @@ export class Tools {
     for (const g of this.grabs) if (g) set.add(g.target);
     for (const s of this.strokes) if (s) set.add(this._top(s.mesh));
     if (this.preview) set.add(this.preview);
+    if (this.frame && !this.frame.done) set.add(this.frame.obj);
     return set;
   }
 
@@ -287,6 +302,49 @@ export class Tools {
     };
   }
 
+  // Both hands in an "L" (like framing a photo): the frame between them
+  // becomes a drawing area once held still for a moment.
+  _frame(hands, dt) {
+    const [a, b] = hands;
+    const framing = a.present && b.present && a.gesture === 'frame' && b.gesture === 'frame';
+    const f = this.frame;
+    if (!framing) {
+      if (f) {
+        if (!f.done) { f.obj.removeFromParent(); disposeObject(f.obj); }
+        this.frame = null;
+      }
+      return;
+    }
+    if (f?.done) { this.hint = 'area placed: relax your hands'; return; }
+    const A = a.cornerWorld;
+    const B = b.cornerWorld;
+    const data = shapeFromHands('board', A, B, this.world.camera.quaternion, this.thickness, '#ffffff');
+    if (f) { f.obj.removeFromParent(); disposeObject(f.obj); }
+    const obj = buildObject(data);
+    obj.userData.preview = true;
+    obj.traverse((o) => { if (o.material) { o.material.transparent = true; o.material.opacity *= 0.55; } });
+    this.world.content.add(obj);
+    // Count how long the frame has stayed (about) still.
+    const moved = f ? f.last.distanceTo(A) + f.lastB.distanceTo(B) : 0;
+    const held = f && moved < 0.02 ? f.held + dt : 0;
+    this.frame = { obj, held, last: A.clone(), lastB: B.clone(), done: false };
+    const k = Math.min(1, held / 0.6);
+    this.hint = `hold still to place the area · ${Math.round(k * 100)}%`;
+    if (k >= 1) {
+      // Rebuild at full opacity as the real thing.
+      obj.removeFromParent();
+      disposeObject(obj);
+      const placed = buildObject(data);
+      this.world.content.add(placed);
+      this.fx.popIn(placed);
+      this.fx.ripple(placed.getWorldPosition(new Vector3()), '#ffffff', this.world.camera, 0.2);
+      pop();
+      if (this.settings.stick) this._stick(placed);
+      this.store.commit();
+      this.frame = { obj: placed, held, last: A.clone(), lastB: B.clone(), done: true };
+    }
+  }
+
   // Both hands pinching empty space: stretch a new shape between them.
   _shape(hands) {
     const [a, b] = hands;
@@ -296,6 +354,7 @@ export class Tools {
         this.thickness, this.settings.color);
       if (this.preview) { this.preview.removeFromParent(); disposeObject(this.preview); }
       this.preview = buildObject(data);
+      this.preview.userData.preview = true;
       this.world.content.add(this.preview);
       this.hint = `${(a.world.distanceTo(b.world) * 100).toFixed(1)} cm, let go to place`;
       if (Math.random() < 0.5) {
@@ -307,6 +366,7 @@ export class Tools {
     if (this.preview) {
       const p = this.preview;
       this.preview = null;
+      p.userData.preview = false;
       if (!p.userData.data.dims.some((v) => v > 0.03)) {
         p.removeFromParent();
         disposeObject(p);

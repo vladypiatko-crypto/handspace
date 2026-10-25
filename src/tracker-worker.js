@@ -8,8 +8,8 @@ const core = new TrackerCore();
 self.onmessage = async ({ data: msg }) => {
   try {
     if (msg.type === 'init') {
-      await core.init(msg.wasmBase, msg.models);
-      self.postMessage({ type: 'ready' });
+      const delegate = await core.init(msg.wasmBase, msg.models);
+      self.postMessage({ type: 'ready', delegate });
     } else if (msg.type === 'enable') {
       await core.enable(msg.kind);
       self.postMessage({ type: 'enabled', kind: msg.kind });

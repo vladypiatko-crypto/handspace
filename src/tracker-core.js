@@ -3,14 +3,16 @@ import { FilesetResolver, HandLandmarker, FaceLandmarker, PoseLandmarker, Object
 // The MediaPipe models themselves. Runs either in a Web Worker (normally) or on
 // the main thread (fallback), so it never touches the DOM.
 
+// Returns [model, 'GPU' | 'CPU'].
 async function create(Task, fileset, options) {
-  // The GPU delegate is much faster but not available everywhere.
+  // The GPU delegate is many times faster but not available everywhere.
   for (const delegate of ['GPU', 'CPU']) {
     try {
-      return await Task.createFromOptions(fileset, {
+      const model = await Task.createFromOptions(fileset, {
         ...options,
         baseOptions: { ...options.baseOptions, delegate },
       });
+      return [model, delegate];
     } catch (err) {
       if (delegate === 'CPU') throw err;
       console.warn('GPU delegate failed, using CPU', err);
@@ -37,7 +39,7 @@ export class TrackerCore {
   async init(wasmBase, models) {
     this.urls = models;
     this.fileset = await FilesetResolver.forVisionTasks(wasmBase);
-    this.models.hand = await create(HandLandmarker, this.fileset, {
+    [this.models.hand, this.delegate] = await create(HandLandmarker, this.fileset, {
       baseOptions: { modelAssetPath: models.hand },
       runningMode: 'VIDEO',
       numHands: 2,
@@ -47,6 +49,12 @@ export class TrackerCore {
       minHandPresenceConfidence: 0.35,
       minTrackingConfidence: 0.35,
     });
+    return this.delegate;
+  }
+
+  close() {
+    for (const m of Object.values(this.models)) m?.close?.();
+    this.models = {};
   }
 
   has(kind) {
@@ -67,12 +75,12 @@ export class TrackerCore {
       baseOptions: { modelAssetPath: this.urls[kind] },
       runningMode: 'VIDEO',
       ...options[1],
-    }).then((m) => { this.models[kind] = m; });
+    }).then(([m]) => { this.models[kind] = m; });
     return this.loading[kind];
   }
 
-  // Hands run on every frame; face, body and objects take turns on the frames
-  // in between so the hands stay fast.
+  // Hands run on every frame; face, body and objects run every few frames
+  // (face: every `face` frames, 0 = off) so the hands stay fast.
   run(source, now, { face, pose, objects }) {
     if (now <= this.lastNow) now = this.lastNow + 1; // MediaPipe needs increasing timestamps
     this.lastNow = now;
@@ -90,7 +98,7 @@ export class TrackerCore {
     }));
 
     if (!face) r.face = null;
-    else if (this.models.face && this.frame % 2 === 0) {
+    else if (this.models.face && this.frame % face === 0) {
       const f = this.models.face.detectForVideo(source, now);
       r.face = f.faceLandmarks[0] ? { lm: f.faceLandmarks[0], blend: blendMap(f.faceBlendshapes[0]) } : null;
     }
@@ -102,7 +110,7 @@ export class TrackerCore {
     }
 
     if (!objects) r.objects = null;
-    else if (this.models.objects && this.frame % 4 === 3) {
+    else if (this.models.objects && this.frame % 6 === 3) {
       const d = this.models.objects.detectForVideo(source, now);
       r.objects = d.detections.map((det) => ({
         label: det.categories[0]?.categoryName ?? 'thing',

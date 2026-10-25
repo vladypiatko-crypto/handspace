@@ -16,7 +16,8 @@ export class Store {
   }
 
   snapshot() {
-    return JSON.stringify(this.content.children.filter((o) => o.userData.data).map(serialize));
+    // Previews (shapes still being stretched or framed) aren't saved.
+    return JSON.stringify(this.content.children.filter((o) => o.userData.data && !o.userData.preview).map(serialize));
   }
 
   load() {

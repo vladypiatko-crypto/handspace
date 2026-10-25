@@ -6,10 +6,12 @@ It runs entirely in the browser on PCs, phones and tablets, with nothing to inst
 
 ## Features
 
-- **Hand, face, body and object tracking** with Google's MediaPipe models. Tracking runs in a background worker, so the 3D view stays smooth.
+- **Hand, face, body and object tracking** with Google's MediaPipe models, on the GPU where possible. The corner readout shows the frame rate, the hand-tracking rate, and GPU or CPU.
+- **Full screen** with the controls hidden, from the toolbar or the palm menu.
 - **☝️ Point to draw** in 3D: index finger straight, other fingers folded. Move your hand closer to or further from the camera to draw in depth.
 - **🤏 Pinch to grab** anything and move it anywhere. **Twist your wrist** to turn it. Pinch with both hands to scale and rotate it.
-- **🤏🤏 Pinch both hands and pull apart** to mark a glowing white **drawing area**. Point at the area to draw on it. The shape picker has other shapes too: slime, hatched bar, box, sphere, cylinder, cone and ring.
+- **🖐 Frame it:** make an L with thumb and index on both hands, like framing a photo, and hold still. The frame becomes a drawing area.
+- **🤏🤏 Pinch both hands and pull apart** to mark a white **drawing area**. Point at the area to draw on it. The shape picker has other shapes too: slime, hatched bar, box, sphere, cylinder, cone and ring.
 - **Hands-free control.** Pinch over any button to press it. Hold an open palm up for a second to open a ring menu around your hand. The app remembers your camera setup and starts by itself, and the phone reconnects to the PC on its own.
 - **🍎 Gravity:** things fall, bounce, pile up and land on drawing areas. Let go while moving to throw. **Slime** squishes, wobbles and splats.
 - **📌 Stick:** draw on (or drop things onto) your face, your hands, your body, or a recognized object such as a cup, phone, bottle or book. It sticks and moves with it. Grab it to pull it off.
@@ -40,6 +42,7 @@ Both devices must be able to open the app over **HTTPS**, for example from the G
 | 🤏 Pinch an object | Grab and move it; twist your wrist to turn it |
 | Pinch an object with both hands | Scale and rotate it |
 | 🤏🤏 Pinch both hands in empty space and pull apart | Mark a drawing area (or the chosen shape) |
+| Two "L" hands (thumb + index), held still | Mark a drawing area |
 | 🤏 Pinch over a button | Press it |
 | ✋ Hold an open palm up | Open the ring menu |
 | Hold a fist ✊ | Undo |
@@ -75,7 +78,7 @@ Pushing to `main` deploys to GitHub Pages through `.github/workflows/deploy.yml`
 
 | File | Role |
 |---|---|
-| `src/tracker*.js` | MediaPipe hand / face / body / object models, run in a Web Worker |
+| `src/tracker*.js` | MediaPipe hand / face / body / object models: GPU on the main thread, or a Web Worker when there's only a CPU |
 | `src/hands.js` | Pinch / point detection, distance from camera (from palm size), wrist rotation, smoothing (One Euro filter), gestures |
 | `src/airui.js` | Hands-free buttons and the palm ring menu |
 | `src/anchors.js` | Face / hand / body / object anchors for sticking things to real things |

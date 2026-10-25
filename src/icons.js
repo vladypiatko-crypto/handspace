@@ -25,10 +25,12 @@ import camera from 'lucide-static/icons/video.svg?raw';
 import arrow from 'lucide-static/icons/chevron-right.svg?raw';
 import moon from 'lucide-static/icons/moon.svg?raw';
 import shapes from 'lucide-static/icons/shapes.svg?raw';
+import maximize from 'lucide-static/icons/maximize.svg?raw';
+import minimize from 'lucide-static/icons/minimize.svg?raw';
 
 const ICONS = {
   create, paint, erase, undo, redo, menu, gravity, stick, board, slime, bar, box, sphere, cylinder, cone,
-  torus, view, close, color, flip, phone, monitor, camera, arrow, moon, shapes,
+  torus, view, close, color, flip, phone, monitor, camera, arrow, moon, shapes, maximize, minimize,
 };
 
 // SVG markup for an icon, sized in px and using the current text color.

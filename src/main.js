@@ -852,6 +852,8 @@ for (const b of $$('[data-start]')) {
 }
 
 applyIcons();
+// Android phones (not already in the app) get a download link for the app.
+if (/Android/i.test(navigator.userAgent) && !navigator.userAgent.includes('HandSpaceApp')) $('#get-apk').classList.remove('hidden');
 buildToolbar();
 requestAnimationFrame(loop);
 

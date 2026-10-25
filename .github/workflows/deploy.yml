@@ -26,6 +26,13 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      # Build the Android app too and publish it next to the site.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm run apk
+      - run: cp android/build/HandSpace.apk dist/HandSpace.apk
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
